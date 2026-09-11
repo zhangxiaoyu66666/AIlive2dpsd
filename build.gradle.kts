@@ -104,11 +104,18 @@ distributions {
 	}
 }
 
+val desktopDistributionRoot = layout.buildDirectory.dir(
+    providers.gradleProperty("distributionOutputDir").orElse("compose/binaries")
+)
+
 compose.desktop {
 	application {
 		mainClass = "io.github.psd2live.MainKt"
 		jvmArgs += listOf("-Xmx8g", "-Dfile.encoding=UTF-8")
 		nativeDistributions {
+            outputBaseDir.set(desktopDistributionRoot)
+            // LWJGL loads sun.misc.Unsafe reflectively; jdeps cannot infer this dependency.
+            modules("jdk.unsupported")
 			targetFormats(
 				org.jetbrains.compose.desktop.application.dsl.TargetFormat.Exe,
 				org.jetbrains.compose.desktop.application.dsl.TargetFormat.Msi,
@@ -159,7 +166,7 @@ afterEvaluate {
 
 	tasks.named("createDistributable").configure {
 		doLast {
-			val appDir = file("build/compose/binaries/main/app/PSD2Live/app")
+			val appDir = desktopDistributionRoot.get().dir("main/app/PSD2Live/app").asFile
 			if (appDir.exists()) {
 				copy {
 					from("LICENSE", "THIRD_PARTY_NOTICES.md", "docs/eye-rig-reliability.md", "docs/native-file-picker.md")
@@ -232,4 +239,28 @@ tasks.register<JavaExec>("eyeRigVisualCheck") {
         args(providers.gradleProperty("eyeRigSource").get(),
             providers.gradleProperty("eyeRigOutput").getOrElse(layout.buildDirectory.dir("eye-rig-qa").get().asFile.absolutePath))
     }
+}
+
+// A full development JDK can mask missing modules in the shipped jlink image.
+// Use its launcher only; -XXaltjvm selects the actual packaged JVM and module image.
+val verifyPackagedFilePicker = tasks.register<JavaExec>("verifyPackagedFilePicker") {
+    dependsOn(tasks.testClasses)
+    mainClass.set("io.github.psd2live.ui.PackagedNativeProbe")
+    javaLauncher.set(javaToolchains.launcherFor { languageVersion.set(JavaLanguageVersion.of(21)) })
+    onlyIf {
+        System.getProperty("os.name").startsWith("Windows", ignoreCase = true) &&
+            tasks.named("createDistributable").get().state.failure == null
+    }
+    doFirst {
+        val app = desktopDistributionRoot.get().dir("main/app/PSD2Live").asFile
+        val runtime = File(app, "runtime")
+        check(File(runtime, "bin/server/jvm.dll").isFile) { "Packaged JVM is missing: $runtime" }
+        classpath = files(sourceSets["test"].output.classesDirs, fileTree(File(app, "app")) { include("*.jar") })
+        jvmArgs("-XXaltjvm=${File(runtime, "bin/server").absolutePath}", "-Djava.awt.headless=true")
+        args(runtime.absolutePath)
+    }
+}
+afterEvaluate {
+    tasks.named("createDistributable") { finalizedBy(verifyPackagedFilePicker) }
+    verifyPackagedFilePicker.configure { dependsOn("createDistributable") }
 }

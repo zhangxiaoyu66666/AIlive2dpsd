@@ -28,3 +28,13 @@ Windows 的打开 PSD、打开工程、另存工程和导出目录统一使用 N
 
 - https://github.com/btzy/nativefiledialog-extended
 - https://github.com/LWJGL/lwjgl3/tree/3.4.2/modules/lwjgl/nfd
+
+## 发布运行时修复
+
+后续真实使用暴露 `Failed to initialize a backend for MemoryUtil`。已用原发布目录的 `runtime/bin/server/jvm.dll` 和 `app/*.jar` 无窗口复现，底层错误为缺少 `sun.misc.Unsafe`。完整开发 JDK 的初始化测试不能代替精简发布运行时验收。
+
+打包显式包含 `jdk.unsupported`。`createDistributable` 结束后自动执行 `verifyPackagedFilePicker`：用同版本 JDK 的 launcher 配合 `-XXaltjvm` 选择实际发布 JVM，并校验 `java.home` 确实指向发布目录；检查 native 内存分配与释放、NFD、COM 和中文筛选参数，绝不打开文件选择窗口。检查失败会让构建失败。此检查在 Windows 执行，其他平台仍需各自验收。
+
+可以用 `-PdistributionOutputDir=compose/runtime-fixed-binaries` 将构建放到独立目录，保留用户当前运行的旧程序。完整命令：`gradlew check createDistributable -PdistributionOutputDir=compose/runtime-fixed-binaries`。
+
+依据：https://kotlinlang.org/docs/multiplatform/compose-native-distribution.html#including-jdk-modules
