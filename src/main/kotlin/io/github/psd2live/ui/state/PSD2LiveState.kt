@@ -69,6 +69,7 @@ data class HistoryAnnotation(val title: String = "", val note: String = "", val 
 @Immutable
 data class PSD2LiveState(
 	val projectId: String? = null,
+    val sourceWorkflow: io.github.psd2live.workflow.SourceWorkflowRecord? = null,
     val projectFile: String? = null,
     val projectDirty: Boolean = false,
     val projectSaving: Boolean = false,

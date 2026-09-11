@@ -28,7 +28,7 @@ class AgentWorkspaceTabs {
         val entry = entries[id] ?: return false
         if (!entry.operations.tryLock()) return false
         try {
-            if (entry.closed) return false
+            if (entry.closed || entry.summary?.invoke()?.get("busy")?.jsonPrimitive?.booleanOrNull == true) return false
             entry.owner = null
             entry.lease = null
             ownershipChanged()
@@ -74,6 +74,7 @@ class AgentWorkspaceTabs {
     suspend fun release(id: String, lease: String) {
         val entry = requireEntry(id)
         entry.operations.withLock {
+            check(entry.summary?.invoke()?.get("busy")?.jsonPrimitive?.booleanOrNull != true) { "Tab has an active background operation; stop waiting or let it finish first" }
             check(!entry.closed && entry.lease == lease) { "Invalid or expired lease_id" }
             entry.owner = null
             entry.lease = null

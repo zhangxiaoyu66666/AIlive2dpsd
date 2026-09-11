@@ -31,7 +31,7 @@ internal object WindowsFilePicker : FilePickerBackend {
                 val status = when (request.kind) {
                     FilePickerKind.DIRECTORY -> NFD_PickFolder_With(result,
                         NFDPickFolderArgs.calloc(stack).defaultPath(directory).parentWindow(parent))
-                    FilePickerKind.SAVE_PROJECT -> NFD_SaveDialog_With(result,
+                    FilePickerKind.SAVE_PROJECT, FilePickerKind.SAVE_PSD -> NFD_SaveDialog_With(result,
                         NFDSaveDialogArgs.calloc(stack).filterList(filters).defaultPath(directory)
                             .defaultName(request.defaultName?.let(stack::UTF8)).parentWindow(parent))
                     else -> NFD_OpenDialog_With(result,

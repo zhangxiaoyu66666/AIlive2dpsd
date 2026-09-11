@@ -121,7 +121,7 @@ class PsdSyntheticTest {
 	 * @param String? unicodeName The Unicode name to embed in a luni block, or null to omit luni.
 	 * @return ByteArray The complete `.psd` bytes.
 	 */
-	private fun buildRgbPsd(
+	internal fun buildRgbPsd(
 		width: Int,
 		height: Int,
 		name: String,

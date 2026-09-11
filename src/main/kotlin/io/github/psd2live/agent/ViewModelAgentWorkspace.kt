@@ -1,5 +1,6 @@
 package io.github.psd2live.agent
 
+import kotlinx.serialization.json.JsonObject
 import io.github.psd2live.core.Bounds
 import io.github.psd2live.core.PipelineConfig
 import io.github.psd2live.core.PreviewRenderer
@@ -83,6 +84,7 @@ class ViewModelAgentWorkspace(
         val store: AgentWorkspaceStore,
         val spatial: Map<String, AgentViewSpatialMetadata>,
     )
+    override suspend fun sourceWorkflow(action: String, arguments: JsonObject): JsonObject = viewModel.sourceWorkflow.execute(action, arguments)
     private val projectDirectories = mutableListOf<Path>()
     internal fun rememberProjectDirectory(path: Path) { projectDirectories.add(path) }
     internal suspend fun flushProjectPersistence() { persistenceScope.launch { }.join() }
@@ -117,6 +119,7 @@ class ViewModelAgentWorkspace(
             layerTombstones.clear()
             if (migrated != null) applyPreviewOrThrow(preview, documentFrom(state), document, "Recovered legacy workspace")
             scheduleHistoryPersistence(id, historyTree!!)
+            viewModel.updateHistorySnapshot(history())
         }
         if (migrated != null) viewModel.loadAgentWorkspacePreview(preview)
     }

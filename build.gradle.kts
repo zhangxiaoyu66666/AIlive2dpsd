@@ -82,7 +82,7 @@ dependencies {
 	implementation("org.jetbrains.compose.material:material:1.11.1")
 	testImplementation(kotlin("test"))
 	testImplementation("io.modelcontextprotocol:kotlin-sdk-client:0.15.0")
-	testImplementation("io.ktor:ktor-client-cio")
+	implementation("io.ktor:ktor-client-cio")
 }
 
 
@@ -169,7 +169,7 @@ afterEvaluate {
 			val appDir = desktopDistributionRoot.get().dir("main/app/PSD2Live/app").asFile
 			if (appDir.exists()) {
 				copy {
-					from("LICENSE", "THIRD_PARTY_NOTICES.md", "docs/eye-rig-reliability.md", "docs/native-file-picker.md", "docs/project-tabs.md")
+                    from("LICENSE", "THIRD_PARTY_NOTICES.md", "docs/eye-rig-reliability.md", "docs/native-file-picker.md", "docs/project-tabs.md", "docs/source-workflow.md")
 					into(appDir.parentFile)
 				}
 				copy {
@@ -263,4 +263,18 @@ val verifyPackagedFilePicker = tasks.register<JavaExec>("verifyPackagedFilePicke
 afterEvaluate {
     tasks.named("createDistributable") { finalizedBy(verifyPackagedFilePicker) }
     verifyPackagedFilePicker.configure { dependsOn("createDistributable") }
+}
+
+// Opt-in live local inference. Never part of check; does not start or stop See-Through.
+tasks.register<JavaExec>("sourceWorkflowLiveCheck") {
+    dependsOn(tasks.testClasses)
+    classpath = sourceSets["test"].runtimeClasspath
+    mainClass.set("io.github.psd2live.workflow.SourceWorkflowLiveCheck")
+    javaLauncher.set(javaToolchains.launcherFor { languageVersion.set(JavaLanguageVersion.of(21)) })
+    maxHeapSize = "4g"
+    systemProperty("java.awt.headless", "true")
+    doFirst {
+        args(providers.gradleProperty("workflowImage").get(), providers.gradleProperty("workflowOutput").get())
+        providers.gradleProperty("workflowResultUrl").orNull?.let { args(it) }
+    }
 }

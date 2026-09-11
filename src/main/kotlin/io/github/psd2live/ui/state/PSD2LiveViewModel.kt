@@ -21,6 +21,7 @@ import io.github.psd2live.i18n.AppLanguage
 import io.github.psd2live.i18n.I18n
 import io.github.psd2live.i18n.tr
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -43,6 +44,11 @@ import kotlin.math.PI
 import kotlin.math.sin
 
 class PSD2LiveViewModel : AutoCloseable {
+    val sourceWorkflow = io.github.psd2live.workflow.SourceWorkflowController(this)
+    internal fun sourceWorkflowHistoryHead(): String? = agentWorkspace?.snapshot()?.historyHeadNodeId
+    internal fun setSourceWorkflow(record: io.github.psd2live.workflow.SourceWorkflowRecord) {
+        _state.update { it.copy(sourceWorkflow = record, projectDirty = true, projectAuxiliaryVersion = it.projectAuxiliaryVersion + 1) }
+    }
     @Volatile var presentationActive: Boolean = true
     internal var claimProjectPath: (Path) -> Unit = {}
     internal var claimExportPath: (Path) -> Unit = {}
@@ -1272,7 +1278,7 @@ class PSD2LiveViewModel : AutoCloseable {
 		}
 
 		activeWorkJob?.cancel()
-		activeWorkJob = scope.launch {
+		activeWorkJob = scope.launch(start = CoroutineStart.UNDISPATCHED) {
 			_state.update {
 				it.copy(
 					isAnalyzing = true,
@@ -1283,6 +1289,8 @@ class PSD2LiveViewModel : AutoCloseable {
 				)
 			}
 			try {
+				val importedVersion = _state.value.sourceWorkflow?.imported
+                if (importedVersion != null) withContext(Dispatchers.IO) { io.github.psd2live.workflow.SourceVersions.verify(importedVersion) }
 				val config = _state.value.copy(rigGenerationVersion = 3, layerVisibility = emptyMap(), layerOverrides = emptyMap(), deletedLayerIds = emptySet(), parentOverrides = emptyMap(), rigEdits = RigEditOverlay.Empty).buildConfig()
 				val preview = withContext(Dispatchers.Default) {
 					pipeline.buildPreview(input, config)
@@ -1311,7 +1319,7 @@ class PSD2LiveViewModel : AutoCloseable {
 						isIndeterminateProgress = false,
 						projectId = java.util.UUID.randomUUID().toString(),
                         rigGenerationVersion = 3,
-                        projectSourceName = input.fileName.toString(),
+                        projectSourceName = current.sourceWorkflow?.imported?.path?.let { Path.of(it).fileName.toString() } ?: input.fileName.toString(),
                         projectFile = null, projectDirty = true, showProjectLocationDialog = false, isAnalyzing = true,
                         layerVisibility = emptyMap(), layerOverrides = emptyMap(), deletedLayerIds = emptySet(), parentOverrides = emptyMap(), rigEdits = RigEditOverlay.Empty,
                         selectedLayerId = null, selectedDeformerId = null, isolatedLayerId = null, isolationSnapshot = null,
@@ -1368,17 +1376,21 @@ class PSD2LiveViewModel : AutoCloseable {
 		}
 		lastExportDirectory = rawOutput
 		val input = Path.of(rawInput)
-		val output = Path.of(rawOutput)
-        try { claimExportPath(output) } catch (failure: Exception) { _state.update { it.copy(errorMessage = failure.message) }; return }
+		val destination = Path.of(rawOutput)
+        val output = if (_state.value.sourceWorkflow?.imported != null) destination.resolve(
+            "generation-${java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"))}-${java.util.UUID.randomUUID().toString().take(8)}") else destination
+        try { claimExportPath(destination) } catch (failure: Exception) { _state.update { it.copy(errorMessage = failure.message) }; return }
 		val config = _state.value.buildConfig()
-		val workspaceSource = _state.value.analysis?.source
+		val generationState = _state.value
+        val generationHead = agentWorkspace?.snapshot()?.historyHeadNodeId
+        val workspaceSource = generationState.analysis?.source
 		if (!config.exportCmo3 && !config.exportMoc3) {
 			_state.update { it.copy(errorMessage = tr("dialog.exportFormatRequired")) }
 			return
 		}
 
 		activeWorkJob?.cancel()
-		activeWorkJob = scope.launch {
+		activeWorkJob = scope.launch(start = CoroutineStart.UNDISPATCHED) {
 			_state.update {
 				it.withLog(tr("status.generating"), level = LogLevel.INFO, tag = "Export").copy(
 					isGenerating = true,
@@ -1400,31 +1412,42 @@ class PSD2LiveViewModel : AutoCloseable {
 							}
 						}
 					if (workspaceSource != null) {
-						pipeline.run(workspaceSource, _state.value.projectSourceName ?: input.fileName.toString(), output, config, progress)
+						pipeline.run(workspaceSource, generationState.projectSourceName ?: input.fileName.toString(), output, config, progress)
 					} else {
 						pipeline.run(input, output, config, progress)
 					}
 				}
+                val receipt = generationState.sourceWorkflow?.takeIf { it.imported != null }?.let { lineage ->
+                    withContext(Dispatchers.IO) {
+                        io.github.psd2live.workflow.SourceVersions.receipt(lineage, generationState.projectId, generationHead, result, output).also {
+                            io.github.psd2live.workflow.SourceVersions.writeReceipt(output, it)
+                        }
+                    }
+                }
 				_state.update { current ->
 					val outputLogs = listOf(
 						tr("log.outputFiles"),
 					) + result.exportedFiles.map { "• ${it.path} (${it.bytes} bytes)" } +
 						(if (result.warnings.isNotEmpty()) listOf(tr("log.warnings")) + result.warnings.map { "• $it" } else emptyList())
 					val summary = tr("status.completed", result.exportedFiles.size, result.warnings.size)
+                    val unchanged = current.projectEditVersion == generationState.projectEditVersion
 					current.withLogs(outputLogs, level = if (result.warnings.isNotEmpty()) LogLevel.WARNING else LogLevel.SUCCESS, tag = "Export").copy(
 						isGenerating = false,
 						progress = 1f,
-						analysis = result.previewModel.analysis,
+						analysis = if (unchanged) result.previewModel.analysis else current.analysis,
+                        sourceWorkflow = if (receipt != null) generationState.sourceWorkflow.copy(generation = receipt) else current.sourceWorkflow,
+                        projectDirty = current.projectDirty || receipt != null,
+                        projectAuxiliaryVersion = current.projectAuxiliaryVersion + if (receipt != null) 1 else 0,
 						loadedInputPath = current.loadedInputPath ?: input.toAbsolutePath().normalize().toString(),
 						loadedInputFileSignature = current.loadedInputFileSignature ?: runCatching {
 							"${Files.size(input)}:${Files.getLastModifiedTime(input).toMillis()}"
 						}.getOrNull(),
-						previewModel = result.previewModel,
+						previewModel = if (unchanged) result.previewModel else current.previewModel,
 						statusText = summary,
 						successExportMessage = tr("dialog.exportSuccess", result.exportedFiles.size, output),
 					)
 				}
-				sdkSession.load(result.previewModel.runtimeBundle, result.previewModel.rig.puppet.parameters.map { it.id })
+				if (_state.value.previewModel === result.previewModel) sdkSession.load(result.previewModel.runtimeBundle, result.previewModel.rig.puppet.parameters.map { it.id })
 			} catch (failure: Throwable) {
 				val detail = failure.message ?: failure.javaClass.simpleName
 				_state.update {
@@ -1859,6 +1882,7 @@ class PSD2LiveViewModel : AutoCloseable {
 
 	override fun close() {
 		if (!isClosed.compareAndSet(false, true)) return
+        sourceWorkflow.close()
 		motionJob?.cancel()
 		previewRebuildJob?.cancel()
 		activeWorkJob?.cancel()

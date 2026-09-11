@@ -52,6 +52,15 @@ class DesktopProjectTabs : AutoCloseable {
         vm.claimProjectPath = { paths.claim(id, it) }
         vm.claimExportPath = { paths.claim(id, it, directory = true) }
         val tab = DesktopProjectTab(id, vm, workspace)
+        vm.sourceWorkflow.importVersion = { version, lineage, activate ->
+            val destination = if (vm.state.value.analysis == null) tab else create(activate = false)
+            destination.viewModel.setSourceWorkflow(lineage)
+            destination.viewModel.setInputPath(version.snapshot)
+            destination.viewModel.setOutputPath(Path.of(version.path).parent.resolve("${Path.of(version.path).fileName.toString().substringBeforeLast('.')}-${version.sha256.take(8)}-${destination.id.take(8)}-export").toString())
+            destination.viewModel.analyze()
+            if (activate) select(destination.id)
+            destination.id
+        }
         // Tab listing reads only the cheap immutable UI summary, never hashes every model's history.
         agents.register(id, workspace) {
             val current = vm.state.value
@@ -60,7 +69,7 @@ class DesktopProjectTabs : AutoCloseable {
                 put("input_name", current.projectSourceName?.let(::JsonPrimitive)
                     ?: current.inputPath.takeIf { it.isNotBlank() }?.let { JsonPrimitive(Path.of(it).fileName.toString()) } ?: JsonNull)
                 put("dirty", current.projectDirty)
-                put("busy", current.isAnalyzing || current.isGenerating || current.projectSaving)
+                put("busy", current.isAnalyzing || current.isGenerating || current.projectSaving || vm.sourceWorkflow.state.value.busy)
                 put("loaded", current.analysis != null)
                 current.errorMessage?.let { put("errorMessage", it) }
             }
@@ -69,7 +78,7 @@ class DesktopProjectTabs : AutoCloseable {
         if (activate || mutable.value.activeId == null) select(id)
         if (path != null) {
             if (path.fileName.toString().endsWith(".psd2live", true)) vm.openProject(path)
-            else { vm.setInputPath(path.toString()); vm.analyze() }
+            else { vm.sourceWorkflow.action("stage_result", "path" to path.toString()) }
         }
         return tab
     }
@@ -93,13 +102,14 @@ class DesktopProjectTabs : AutoCloseable {
         val previousActive = mutable.value.activeId
         val position = mutable.value.tabs.indexOf(tab)
         val snapshot = tab.viewModel.state.value
-        if (snapshot.isAnalyzing || snapshot.isGenerating || snapshot.projectSaving) { reportError(tr("tabs.busy")); return }
+        if (snapshot.isAnalyzing || snapshot.isGenerating || snapshot.projectSaving || tab.viewModel.sourceWorkflow.state.value.busy) { reportError(tr("tabs.busy")); return }
         if (snapshot.projectDirty) select(id)
         tab.viewModel.withSavedChanges {
             // The user may have explicitly discarded dirty changes. Recheck ongoing work under the MCP gate.
             if (!agents.tryRemove(id) {
                 val latest = tab.viewModel.state.value
                 !latest.isAnalyzing && !latest.isGenerating && !latest.projectSaving &&
+                    !tab.viewModel.sourceWorkflow.state.value.busy &&
                     (latest.projectEditVersion == snapshot.projectEditVersion || !latest.projectDirty)
             }) { reportError(tr("tabs.busy")); return@withSavedChanges }
             tab.viewModel.close()

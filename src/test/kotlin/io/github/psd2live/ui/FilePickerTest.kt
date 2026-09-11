@@ -10,6 +10,16 @@ import org.lwjgl.util.nfd.NativeFileDialog.*
 import kotlin.test.*
 
 class FilePickerTest {
+    @Test fun imageFiltersAndEditablePsdSavePreserveExtensionAndOverwriteChecks() = withDirectory { root ->
+        val image = Files.write(root.resolve("角色.WEBP"), byteArrayOf(1))
+        val imagePicker = FilePickerController { _, _ -> image.toString() }
+        assertEquals(image.toString(), imagePicker.choose(FilePickerRequest(FilePickerKind.IMAGE, "Image", "png,jpg,jpeg,webp"), null) { false })
+        val target = Files.writeString(root.resolve("继续拆.psd"), "original")
+        val savePicker = FilePickerController { _, _ -> root.resolve("继续拆").toString() }
+        assertNull(savePicker.choose(FilePickerRequest(FilePickerKind.SAVE_PSD, "Save PSD", "psd"), null) { assertEquals(target, it); false })
+        assertEquals("original", Files.readString(target))
+    }
+
     private fun project(directory: Path? = null) = FilePickerRequest(FilePickerKind.PROJECT, "Open", "psd2live", "PSD2Live", directory)
 
     @Test fun cancelEndsTheRequestWithoutRetryOrOverwriteConfirmation() {

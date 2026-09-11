@@ -14,6 +14,15 @@ object NativeFilePicker {
         FilePickerController(if (System.getProperty("os.name").startsWith("Windows", true)) WindowsFilePicker else PortableFilePicker)
     }
 
+    fun chooseSavePsdFile(window: Window? = null, initialPath: String? = null): String? = choose(window) {
+        FilePickerRequest(FilePickerKind.SAVE_PSD, tr("flow.savePsd"), "psd", tr("dialog.psdFilter"),
+            path(initialPath)?.parent, path(initialPath)?.fileName?.toString() ?: "model.psd")
+    }
+
+    fun chooseImageFile(window: Window? = null, initialPath: String? = null): String? = choose(window) {
+        FilePickerRequest(FilePickerKind.IMAGE, tr("flow.chooseImage"), "png,jpg,jpeg,webp", tr("flow.imageFilter"), path(initialPath))
+    }
+
     fun choosePsdFile(window: Window? = null, initialPath: String? = null): String? = choose(window) {
         FilePickerRequest(FilePickerKind.PSD, tr("dialog.choosePsd"), "psd", tr("dialog.psdFilter"), path(initialPath))
     }

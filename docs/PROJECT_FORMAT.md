@@ -8,6 +8,7 @@
 | --- | --- |
 | `manifest.json` | Format name, version, stable project UUID, and SHA-256 inventory of every payload file |
 | `source/original.psd` | Original imported source bytes |
+| `source/confirmed.psd` | Optional reviewed See-Through/local PSD version, preserved separately from the actual imported version |
 | `workspace.json` | Durable UI state: layout, camera, selections, parameter preview/locks, history annotations and logs |
 | `images/<sha256>.png` | Images referenced by log entries |
 | `workspace/<projectId>/HEAD.json` | Current history node and explicit node insertion order |
@@ -29,6 +30,8 @@ The format preserves all branches without automatic pruning. Checkout changes HE
 
 Runtime previews are rebuilt from the saved editable source and each snapshot's own settings. Native SDK handles, sockets, active jobs and animation clocks are not serialized. Saved Agent tasks are records available for explicit continuation, not executable jobs.
 
+`workspace.json.sourceWorkflow` optionally stores a version-1 source lineage: service endpoint/event, decomposition options and input hash, confirmed/imported source identities, parent project ID, and the latest generation receipt. On open, immutable snapshot paths are rebound to the extracted `source` entries and their content hashes are checked. External working paths are informational; opening does not depend on those files. Source lineage belongs to the project, while rig settings and edits remain in its history. Older projects without this field remain valid.
+
 Existing recovery stores can still read legacy `.rgba.gz` resources. Importing their original PSD migrates matching history and task data into a new UUID workspace, preserving the original cache. Old export JSON files are export reports, not complete projects.
 
 ## Validation and editing by hand
@@ -39,7 +42,7 @@ JSON and PNGs are inspectable, but changing a package by hand requires updating 
 
 ## UI and MCP entry points
 
-- Import PSD: `Ctrl+Shift+O`; choose a custom directory, the PSD's directory, or the installation's `projects` directory. Confirming writes the first project immediately.
+- Import PSD: `Ctrl+Shift+O`; the selected file becomes a review candidate in the tab's source workflow. Confirm its version, select the actual PSD to import, and import before rigging. Save the resulting project with `Ctrl+S`.
 - Open project: `Ctrl+O`; save: `Ctrl+S`; save as: `Ctrl+Shift+S`.
 - Undo: `Ctrl+Z`; redo/choose a branch: `Ctrl+Y` or `Ctrl+Shift+Z`.
 - `project_save`: saves to the location selected in the application and returns its checkpoint node ID. It reports an error if no destination is selected.

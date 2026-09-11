@@ -17,7 +17,7 @@
 1. `tab_list` 查看标签，或 `tab_create({"path":"M:\\AI_Pet\\模型.psd2live"})` 创建后台标签。path 可省略，支持 PSD/PSD2Live 绝对路径。路径重复则拒绝；创建不是幂等操作，响应不确定时先查询列表。
 2. `tab_claim({"tab_id":"返回的 ID","agent_name":"眼部修复"})` 取得私有 `lease_id`。
 3. 所有工程工具必须带 `tab_id`；写工具还必须带对应 `lease_id`。例如 `project_get_state({"tab_id":"…"})`、`project_save({"tab_id":"…","lease_id":"…"})`。
-4. 等待 `project_get_state` 显示 `loaded=true` 且 `busy=false` 再编辑；打开失败时读取 `errorMessage`，该标签界面也显示错误。修改仍需遵守原来的 `expected_history_head_node_id` 契约。
+4. `.psd` 先进入制作流程候选，需要 `source_workflow` 确认、导入（见 [制作流程](source-workflow.md)）；`.psd2live` 直接打开。导入后等待 `project_get_state` 显示 `loaded=true` 且 `busy=false` 再编辑；打开失败时读取 `errorMessage`。修改仍需遵守原来的 `expected_history_head_node_id` 契约。
 5. 完成后 `tab_release({"tab_id":"…","lease_id":"…"})`。MCP 连接重连保留认领；丢失凭证可由用户在界面解除。
 
 同一标签的工具调用串行，不同标签可以并行；用户切换界面不参与 MCP 路由。未知、缺失或已关闭 ID 均报错，不会退回当前标签。列表不公开操作凭证。认领用于避免协作误操作，不构成不同用户/账户之间的安全沙箱：所有连接仍共享本地 MCP 服务的授权。

@@ -5,7 +5,7 @@ import java.awt.Window
 import java.nio.file.Files
 import java.nio.file.Path
 
-internal enum class FilePickerKind { PSD, PROJECT, SAVE_PROJECT, DIRECTORY }
+internal enum class FilePickerKind { IMAGE, PSD, PROJECT, SAVE_PROJECT, SAVE_PSD, DIRECTORY }
 
 internal data class FilePickerRequest(
     val kind: FilePickerKind,
@@ -35,15 +35,16 @@ internal class FilePickerController(private val backend: FilePickerBackend) {
                 require(Files.isDirectory(path)) { tr("dialog.pickerInvalid", path) }
                 path
             }
-            FilePickerKind.SAVE_PROJECT -> {
-                val target = path.resolveSibling(projectFileName(path.fileName.toString()))
+            FilePickerKind.SAVE_PROJECT, FilePickerKind.SAVE_PSD -> {
+                val name = path.fileName.toString()
+                val target = path.resolveSibling(if (request.kind == FilePickerKind.SAVE_PROJECT) projectFileName(name) else if (name.endsWith(".psd", true)) name else "$name.psd")
                 require(Files.isDirectory(target.parent) && !Files.isDirectory(target)) { tr("dialog.pickerInvalid", target) }
                 // Extension normalization can change the file that the OS confirmed.
                 if (target != path && Files.exists(target) && !confirmOverwrite(target)) return null
                 target
             }
             else -> {
-                require(Files.isRegularFile(path) && path.fileName.toString().endsWith(".${request.extension}", true)) {
+                require(Files.isRegularFile(path) && request.extension.orEmpty().split(',').any { path.fileName.toString().endsWith(".$it", true) }) {
                     tr("dialog.pickerInvalid", path)
                 }
                 path

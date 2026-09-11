@@ -386,6 +386,7 @@ data class AgentParameterRangeDiagnostic(
 data class AgentWorkflowResult(val metadata: kotlinx.serialization.json.JsonObject, val images: List<ByteArray> = emptyList())
 
 interface AgentWorkspace {
+    suspend fun sourceWorkflow(action: String, arguments: kotlinx.serialization.json.JsonObject): kotlinx.serialization.json.JsonObject = throw UnsupportedOperationException("Source workflow unavailable")
     fun listRigObjectSummaries(): List<kotlinx.serialization.json.JsonObject> = listRigObjects().map {
         kotlinx.serialization.json.JsonObject(mapOf("kind" to kotlinx.serialization.json.JsonPrimitive(it.kind), "id" to kotlinx.serialization.json.JsonPrimitive(it.id)))
     }

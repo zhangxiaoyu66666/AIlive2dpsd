@@ -49,7 +49,7 @@ fun FrameWindowScope.DesktopTabsApp(
             agentConnectionInfo = connection, agentStartupError = startupError, onCloseRequest = onClose,
             onOpenPath = controller::open,
             onNewTab = { controller.create() }, onCloseTab = { controller.requestClose(active.id) },
-            projectTabs = { ProjectTabBar(controller, tabs) },
+            projectTabs = { ProjectTabBar(controller, tabs); SourceWorkflowPanel(active.viewModel, window) },
         )
     }
 }
@@ -61,8 +61,9 @@ private fun ProjectTabBar(controller: DesktopProjectTabs, tabs: DesktopTabsState
         Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
             tabs.tabs.forEach { tab -> key(tab.id) {
                 val project by tab.viewModel.state.collectAsState()
+                val workflow by tab.viewModel.sourceWorkflow.state.collectAsState()
                 val selected = tab.id == tabs.activeId
-                val title = (project.projectFile ?: project.loadedInputPath ?: project.inputPath).takeIf { it.isNotBlank() }
+                val title = (project.projectFile ?: project.projectSourceName ?: workflow.candidate?.version?.path ?: project.loadedInputPath ?: project.inputPath).takeIf { it.isNotBlank() }
                     ?.let { runCatching { Path.of(it).fileName.toString() }.getOrDefault(it) } ?: tr("project.untitled")
                 Row(Modifier.widthIn(min = 130.dp, max = 260.dp).fillMaxHeight()
                     .background(if (selected) colors.panelElevated else colors.panelBackground)
@@ -73,7 +74,7 @@ private fun ProjectTabBar(controller: DesktopProjectTabs, tabs: DesktopTabsState
                             fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         controller.agents.owner(tab.id)?.let { Text(tr("tabs.agent", it), color = colors.selectionText, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) }
                     }
-                    CompactButton(text = "×", modifier = Modifier.semantics { contentDescription = tr("tabs.close", title) }, onClick = { controller.requestClose(tab.id) }, enabled = !project.projectSaving && !project.isGenerating && !project.isAnalyzing)
+                    CompactButton(text = "×", modifier = Modifier.semantics { contentDescription = tr("tabs.close", title) }, onClick = { controller.requestClose(tab.id) }, enabled = !project.projectSaving && !project.isGenerating && !project.isAnalyzing && !workflow.busy)
                 }
                 Spacer(Modifier.width(1.dp))
             } }

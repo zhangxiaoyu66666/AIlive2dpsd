@@ -34,7 +34,12 @@ internal class ProjectSession(private val viewModel: PSD2LiveViewModel, private 
                 val original = Path.of(state.loadedInputPath ?: state.inputPath)
                 require(Files.isRegularFile(original)) { "Original PSD is unavailable: $original" }
                 Files.createDirectories(root.resolve("source"))
+                state.sourceWorkflow?.imported?.let(io.github.psd2live.workflow.SourceVersions::verify)
                 Files.copy(original, root.resolve("source/original.psd"))
+                state.sourceWorkflow?.confirmed?.let { version ->
+                    io.github.psd2live.workflow.SourceVersions.verify(version)
+                    Files.copy(Path.of(version.snapshot), root.resolve("source/confirmed.psd"))
+                }
                 val ui = WorkspaceStateCodec.encode(state).toMutableMap()
                 ui["logEntries"] = JsonArray(ui.getValue("logEntries").jsonArray.map { entry ->
                     val log = entry.jsonObject.toMutableMap()
@@ -81,7 +86,11 @@ internal class ProjectSession(private val viewModel: PSD2LiveViewModel, private 
                 }
                 JsonObject(log)
             })
-            val state = WorkspaceStateCodec.decode(JsonObject(ui))
+            val restored = WorkspaceStateCodec.decode(JsonObject(ui))
+            val lineage = restored.sourceWorkflow?.let { record ->
+                withContext(Dispatchers.IO) { io.github.psd2live.workflow.SourceVersions.restore(record, root) }
+            }
+            val state = restored.copy(sourceWorkflow = lineage)
             val source = root.resolve("source/original.psd")
             require(Files.isRegularFile(source)) { "Project has no original PSD" }
             workspace.installProject(id, path.toAbsolutePath().normalize(), source, state, tree, store, expected)

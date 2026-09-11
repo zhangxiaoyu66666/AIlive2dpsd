@@ -66,6 +66,7 @@ internal object WorkspaceStateCodec {
         put("exportJson", state.exportJson)
     }
     fun encode(state: PSD2LiveState): JsonObject = buildJsonObject {
+        put("sourceWorkflow", state.sourceWorkflow?.toJson() ?: JsonNull)
         put("projectSourceName", state.projectSourceName)
         put("historyZoom", state.historyZoom)
         put("historyPanX", state.historyPanX)
@@ -158,6 +159,7 @@ internal object WorkspaceStateCodec {
         }) } }
     }
     fun decode(value: JsonObject, base: PSD2LiveState = PSD2LiveState()): PSD2LiveState = base.copy(
+        sourceWorkflow = if ("sourceWorkflow" in value) value["sourceWorkflow"]?.takeUnless { it is JsonNull }?.jsonObject?.let(io.github.psd2live.workflow.SourceWorkflowRecord::fromJson) else base.sourceWorkflow,
         projectSourceName = value["projectSourceName"]?.jsonPrimitive?.contentOrNull ?: base.projectSourceName,
         historyZoom = value["historyZoom"]?.jsonPrimitive?.float ?: base.historyZoom,
         historyPanX = value["historyPanX"]?.jsonPrimitive?.float ?: base.historyPanX,

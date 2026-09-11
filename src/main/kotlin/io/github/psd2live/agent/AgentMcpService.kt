@@ -676,6 +676,7 @@ internal fun createAgentMcpServer(workspace: AgentWorkspace, tabs: AgentWorkspac
     }
 
     registerAssetWorkflowTools(server, workspace, tabs)
+    registerSourceWorkflowTools(server, workspace, tabs)
 
     server.addWorkspaceTool(tabs, workspace,
         name = "rig_preview",
