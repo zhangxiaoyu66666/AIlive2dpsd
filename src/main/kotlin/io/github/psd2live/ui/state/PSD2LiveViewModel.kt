@@ -43,6 +43,9 @@ import kotlin.math.PI
 import kotlin.math.sin
 
 class PSD2LiveViewModel : AutoCloseable {
+    @Volatile var presentationActive: Boolean = true
+    internal var claimProjectPath: (Path) -> Unit = {}
+    internal var claimExportPath: (Path) -> Unit = {}
 	private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 	private val pipeline = PSD2LivePipeline()
 	private val preferences by lazy { Preferences.userNodeForPackage(PSD2LiveViewModel::class.java) }
@@ -85,11 +88,13 @@ class PSD2LiveViewModel : AutoCloseable {
         return projectSession.save(workspace, target, actor)
     }
     fun openProject(path: Path) = withSavedChanges {
+        _state.update { it.copy(isAnalyzing = true, errorMessage = null) }
         scope.launch {
             try {
                 val workspace = agentWorkspace as? io.github.psd2live.agent.ViewModelAgentWorkspace ?: error("Project workspace unavailable")
                 projectSession.open(workspace, path)
             } catch (failure: Exception) { _state.update { it.copy(errorMessage = failure.message) } }
+            finally { _state.update { it.copy(isAnalyzing = false) } }
         }
     }
     internal fun installProjectState(state: PSD2LiveState) {
@@ -1364,6 +1369,7 @@ class PSD2LiveViewModel : AutoCloseable {
 		lastExportDirectory = rawOutput
 		val input = Path.of(rawInput)
 		val output = Path.of(rawOutput)
+        try { claimExportPath(output) } catch (failure: Exception) { _state.update { it.copy(errorMessage = failure.message) }; return }
 		val config = _state.value.buildConfig()
 		val workspaceSource = _state.value.analysis?.source
 		if (!config.exportCmo3 && !config.exportMoc3) {
@@ -1598,6 +1604,7 @@ class PSD2LiveViewModel : AutoCloseable {
 	private fun startMotionLoop() {
 		motionJob = scope.launch {
 			while (isActive) {
+                if (!presentationActive) { lastTick = System.nanoTime(); delay(100); continue }
 				val now = System.nanoTime()
 				val dt = ((now - lastTick) / 1_000_000_000.0).coerceIn(0.001, 0.08).toFloat()
 				lastTick = now

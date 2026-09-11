@@ -112,6 +112,7 @@ data class AgentMcpConnectionInfo(
 class AgentMcpService(
 	private val workspace: AgentWorkspace,
 	private val config: AgentMcpConfig = AgentMcpConfig(),
+    private val tabs: AgentWorkspaceTabs? = null,
 ) : AutoCloseable {
 	private var engine: EmbeddedServer<*, *>? = null
 	private val isClosed = AtomicBoolean(false)
@@ -122,7 +123,7 @@ class AgentMcpService(
 	fun start(): AgentMcpConnectionInfo {
 		check(engine == null) { "Agent MCP service is already running" }
 		val started = embeddedServer(CIO, host = config.host, port = config.port) {
-			configureAgentMcp(workspace, config.token, config.maxRequestBodyBytes)
+			configureAgentMcp(workspace, config.token, config.maxRequestBodyBytes, tabs)
 		}
 		try {
 			started.start(wait = false)
@@ -151,7 +152,7 @@ class AgentMcpService(
 		}
 		engine = null
 		runCatching {
-			(workspace as? AutoCloseable)?.close()
+			if (tabs == null) (workspace as? AutoCloseable)?.close()
 		}
 	}
 }
@@ -172,7 +173,7 @@ object AgentMcpCredentials {
 	}
 }
 
-internal fun Application.configureAgentMcp(workspace: AgentWorkspace, authToken: String, maxRequestBodyBytes: Long = DEFAULT_MCP_MAX_REQUEST_BODY_BYTES) {
+internal fun Application.configureAgentMcp(workspace: AgentWorkspace, authToken: String, maxRequestBodyBytes: Long = DEFAULT_MCP_MAX_REQUEST_BODY_BYTES, tabs: AgentWorkspaceTabs? = null) {
 	require(authToken.length >= 32) { "Agent MCP bearer token is too short" }
 	install(ContentNegotiation) { json(McpJson) }
 	install(SSE)
@@ -200,7 +201,7 @@ internal fun Application.configureAgentMcp(workspace: AgentWorkspace, authToken:
 				post {
 					val sessionId = call.request.header(MCP_SESSION_ID_HEADER)
 					val transport = if (sessionId == null) {
-						createTransport(workspace, transports, maxRequestBodyBytes)
+						createTransport(workspace, transports, maxRequestBodyBytes, tabs)
 					} else {
 						findTransport(sessionId, transports)
 					}
@@ -233,19 +234,20 @@ private suspend fun createTransport(
 	workspace: AgentWorkspace,
 	transports: ConcurrentMap<String, StreamableHttpServerTransport>,
     maxRequestBodyBytes: Long,
+    tabs: AgentWorkspaceTabs?,
 ): StreamableHttpServerTransport {
 	val transport = StreamableHttpServerTransport(
 		StreamableHttpServerTransport.Configuration(enableJsonResponse = true, maxRequestBodySize = maxRequestBodyBytes),
 	)
 	transport.setOnSessionInitialized { sessionId -> transports[sessionId] = transport }
 	transport.setOnSessionClosed { sessionId -> transports.remove(sessionId) }
-	val server = createAgentMcpServer(workspace)
+	val server = createAgentMcpServer(workspace, tabs)
 	server.onClose { transport.sessionId?.let(transports::remove) }
 	server.createSession(transport)
 	return transport
 }
 
-internal fun createAgentMcpServer(workspace: AgentWorkspace): Server {
+internal fun createAgentMcpServer(workspace: AgentWorkspace, tabs: AgentWorkspaceTabs? = null): Server {
 	val server = Server(
 		serverInfo = Implementation("psd2live", "0.6.0"),
 		options = ServerOptions(
@@ -255,19 +257,20 @@ internal fun createAgentMcpServer(workspace: AgentWorkspace): Server {
 				tools = ServerCapabilities.Tools(listChanged = false),
 			),
 		),
-		instructions = AGENT_INSTRUCTIONS,
+		instructions = (if (tabs != null) TAB_INSTRUCTIONS else "") + AGENT_INSTRUCTIONS,
 	)
 
-	server.addTool(
+    tabs?.let { server.addTabTools(it) }
+	server.addWorkspaceTool(tabs, workspace,
 		name = "project_get_state",
 		description = "Read the current PSD2Live project, revision, selection, canvas and summary. Call this before planning work.",
 		toolAnnotations = READ_ONLY,
-	) {
+	) { _, workspace ->
 		val json = workspace.snapshot().toJson(includeLayers = false)
 		jsonResult(json)
 	}
 
-	server.addTool(
+	server.addWorkspaceTool(tabs, workspace,
 		name = "project_list_layers",
 		description = "List stable layer IDs, semantic labels, bounds, visibility and deletion state without reading PSD binary data.",
 		inputSchema = ToolSchema(
@@ -283,7 +286,7 @@ internal fun createAgentMcpServer(workspace: AgentWorkspace): Server {
 			},
 		),
 		toolAnnotations = READ_ONLY,
-	) { request ->
+	) { request, workspace ->
 		val semanticTag = request.arguments?.get("semantic_tag")?.jsonPrimitive?.contentOrNull
 		val includeDeleted = request.arguments?.get("include_deleted")?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: false
 		val snapshot = workspace.snapshot()
@@ -293,11 +296,11 @@ internal fun createAgentMcpServer(workspace: AgentWorkspace): Server {
 		jsonResult(snapshot.toJson(includeLayers = true, layers = layers))
 	}
 
-	server.addTool(
+	server.addWorkspaceTool(tabs, workspace,
 		name = "project_list_parameters",
 		description = "List every parameter ID, range, default, current value and kind in the evaluated rig.",
 		toolAnnotations = READ_ONLY,
-	) {
+	) { _, workspace ->
 		val snapshot = workspace.snapshot()
 		jsonResult(buildJsonObject {
 			put("revisionId", snapshot.revisionId)
@@ -306,12 +309,12 @@ internal fun createAgentMcpServer(workspace: AgentWorkspace): Server {
 		})
 	}
 
-	server.addTool(
+	server.addWorkspaceTool(tabs, workspace,
 		name = "parameter_create",
 		description = "Create a real Cubism parameter in the authoritative rig. It survives layer/mesh rebuilds, history checkout, restart and export.",
 		inputSchema = parameterCreateSchema(),
 		toolAnnotations = MUTATING,
-	) { request ->
+	) { request, workspace ->
 		mutationResult {
 			workspace.createParameter(
 				AgentCreateParameterRequest(
@@ -329,12 +332,12 @@ internal fun createAgentMcpServer(workspace: AgentWorkspace): Server {
 		}
 	}
 
-	server.addTool(
+	server.addWorkspaceTool(tabs, workspace,
 		name = "parameter_update",
 		description = "Update a Cubism parameter's name, numeric range/default, kind, or repeat flag. The stable parameter ID is not renamed.",
 		inputSchema = parameterUpdateSchema(),
 		toolAnnotations = MUTATING,
-	) { request ->
+	) { request, workspace ->
 		mutationResult {
 			workspace.updateParameter(
 				AgentUpdateParameterRequest(
@@ -352,7 +355,7 @@ internal fun createAgentMcpServer(workspace: AgentWorkspace): Server {
 		}
 	}
 
-	server.addTool(
+	server.addWorkspaceTool(tabs, workspace,
 		name = "parameter_delete",
 		description = "Delete a Cubism parameter and safely collapse every drawable, deformer, part and glue keyform axis at its prior default. History remains recoverable.",
 		inputSchema = ToolSchema(
@@ -364,7 +367,7 @@ internal fun createAgentMcpServer(workspace: AgentWorkspace): Server {
 			required = listOf("parameter_id", "expected_history_head_node_id"),
 		),
 		toolAnnotations = MUTATING,
-	) { request ->
+	) { request, workspace ->
 		mutationResult {
 			workspace.deleteParameter(
 				parameterId = request.requiredString("parameter_id"),
@@ -374,40 +377,40 @@ internal fun createAgentMcpServer(workspace: AgentWorkspace): Server {
 		}
 	}
 
-	server.addTool(
+	server.addWorkspaceTool(tabs, workspace,
 		name = "object_get",
 		description = "Read an authoritative rig object (mesh, warp deformer, rotation deformer, part, glue) including its current keyforms, channels, deformer hierarchy, and geometry bounds.",
 		inputSchema = objectGetSchema(),
 		toolAnnotations = READ_ONLY,
-	) { request ->
+	) { request, workspace ->
 		mutationResult {
 			workspace.getObject(request.targetRef()).toJson()
 		}
 	}
 
-    server.addTool(name="mesh_inspect", description="Inspect per-layer effective mesh settings, counts, masks and source-alpha coverage. Uses texture coordinates, independent of pose and foreground occlusion. Call object_get for keyed opacity/draw order values.",
-        inputSchema=meshToolSchema(false), toolAnnotations=READ_ONLY) { request ->
+    server.addWorkspaceTool(tabs, workspace, name="mesh_inspect", description="Inspect per-layer effective mesh settings, counts, masks and source-alpha coverage. Uses texture coordinates, independent of pose and foreground occlusion. Call object_get for keyed opacity/draw order values.",
+        inputSchema=meshToolSchema(false), toolAnnotations=READ_ONLY) { request, workspace ->
         mutationResult { workspace.inspectMeshes(requireNotNull(request.arguments)) }
     }
-    server.addTool(name="mesh_settings_set", description="Set or reset source-pixel mesh settings for up to 32 layers in one history commit. Preserves source textures, non-target layers and channel edits. Refuses vertex-authored mesh keyforms/glue; does not silently erase them. Old projects retain their recorded generation version. Inspect mesh_inspect and history HEAD first.",
-        inputSchema=meshToolSchema(true), toolAnnotations=MUTATING) { request ->
+    server.addWorkspaceTool(tabs, workspace, name="mesh_settings_set", description="Set or reset source-pixel mesh settings for up to 32 layers in one history commit. Preserves source textures, non-target layers and channel edits. Refuses vertex-authored mesh keyforms/glue; does not silently erase them. Old projects retain their recorded generation version. Inspect mesh_inspect and history HEAD first.",
+        inputSchema=meshToolSchema(true), toolAnnotations=MUTATING) { request, workspace ->
         mutationResult { workspace.setMeshSettings(requireNotNull(request.arguments)).toJson() }
     }
-    server.addTool(name="rig_inspect", description="Budgeted geometry inspection at coordinate: summary (default, representation and native control availability, no points), or points (paged up to 256). Local or evaluated canvas coordinates. Does not dump all keyforms.",
-        inputSchema=rigGeometrySchema(false), toolAnnotations=READ_ONLY) { request ->
+    server.addWorkspaceTool(tabs, workspace, name="rig_inspect", description="Budgeted geometry inspection at coordinate: summary (default, representation and native control availability, no points), or points (paged up to 256). Local or evaluated canvas coordinates. Does not dump all keyforms.",
+        inputSchema=rigGeometrySchema(false), toolAnnotations=READ_ONLY) { request, workspace ->
         mutationResult { workspace.inspectRigGeometry(requireNotNull(request.arguments)) }
     }
-    server.addTool(name="rig_transform", description="Apply 1..32 ordered translate/scale/rotate/bend/curve/smooth operations to one Warp or mesh at an exact coordinate. Server edits all points in one history commit. Shared selection + range + ordered operations avoid transferring dense geometry. Supports index, rectangle, point-radius and line-radius selections. Includes root-anchored sway. rig_inspect provides coordinate and axis information.",
-        inputSchema=rigGeometrySchema(true), toolAnnotations=MUTATING) { request ->
+    server.addWorkspaceTool(tabs, workspace, name="rig_transform", description="Apply 1..32 ordered translate/scale/rotate/bend/curve/smooth operations to one Warp or mesh at an exact coordinate. Server edits all points in one history commit. Shared selection + range + ordered operations avoid transferring dense geometry. Supports index, rectangle, point-radius and line-radius selections. Includes root-anchored sway. rig_inspect provides coordinate and axis information.",
+        inputSchema=rigGeometrySchema(true), toolAnnotations=MUTATING) { request, workspace ->
         mutationResult { workspace.transformRigGeometry(requireNotNull(request.arguments)).toJson() }
     }
 
-	server.addTool(
+	server.addWorkspaceTool(tabs, workspace,
 		name = "keyform_set",
 		description = "Set or update keyform geometry and/or channels (opacity, draw order, multiply/screen color, glue intensity) on a target at an exact N-D parameter coordinate. This is not a constant-channel setter: other seeded cells can retain their previous values. Read object_get channel cells and set every intended coordinate.",
 		inputSchema = keyformSetSchema(),
 		toolAnnotations = MUTATING,
-	) { request ->
+	) { request, workspace ->
 		mutationResult {
 			workspace.setKeyform(
 				AgentKeyformSetRequest(
@@ -422,12 +425,12 @@ internal fun createAgentMcpServer(workspace: AgentWorkspace): Server {
 		}
 	}
 
-	server.addTool(
+	server.addWorkspaceTool(tabs, workspace,
 		name = "keyform_delete",
 		description = "Delete a keyform key or an entire parameter axis from a target's geometry grid or specific channel track.",
 		inputSchema = keyformDeleteSchema(),
 		toolAnnotations = MUTATING,
-	) { request ->
+	) { request, workspace ->
 		mutationResult {
 			workspace.deleteKeyform(
 				AgentKeyformDeleteRequest(
@@ -442,12 +445,12 @@ internal fun createAgentMcpServer(workspace: AgentWorkspace): Server {
 		}
 	}
 
-	server.addTool(
+	server.addWorkspaceTool(tabs, workspace,
 		name = "keyform_copy",
 		description = "Copy keyform geometry and/or channels from a source parameter coordinate to a destination parameter coordinate (on the same or another target).",
 		inputSchema = keyformCopySchema(),
 		toolAnnotations = MUTATING,
-	) { request ->
+	) { request, workspace ->
 		mutationResult {
 			workspace.copyKeyform(
 				AgentKeyformCopyRequest(
@@ -463,12 +466,12 @@ internal fun createAgentMcpServer(workspace: AgentWorkspace): Server {
 		}
 	}
 
-	server.addTool(
+	server.addWorkspaceTool(tabs, workspace,
 		name = "rig_k_pose",
 		description = "Capture an explicit or current parameter pose deformation onto a target as keyform keys across all specified parameters.",
 		inputSchema = rigKPoseSchema(),
 		toolAnnotations = MUTATING,
-	) { request ->
+	) { request, workspace ->
 		mutationResult {
 			val params = if (request.arguments?.containsKey("parameters") == true) {
 				request.floatMap("parameters")
@@ -488,27 +491,27 @@ internal fun createAgentMcpServer(workspace: AgentWorkspace): Server {
 		}
 	}
 
-    server.addTool(
+    server.addWorkspaceTool(tabs, workspace,
         name = "project_save",
         toolAnnotations = MUTATING,
         description = "Save the complete portable project to its selected file, creating an immediate history checkpoint. Choose the file location in the UI first.",
-    ) { mutationResult { workspace.saveProject().toJson() } }
-    server.addTool(
+    ) { _, workspace -> mutationResult { workspace.saveProject().toJson() } }
+    server.addWorkspaceTool(tabs, workspace,
         name = "history_checkpoint",
         toolAnnotations = MUTATING,
         description = "Append an explicit history checkpoint even when the model is unchanged.",
         inputSchema = ToolSchema(properties = buildJsonObject { putJsonObject("summary") { put("type", "string") } }, required = listOf("summary")),
-    ) { request -> mutationResult { workspace.checkpoint(request.requiredString("summary")).toJson() } }
+    ) { request, workspace -> mutationResult { workspace.checkpoint(request.requiredString("summary")).toJson() } }
 
-	server.addTool(
+	server.addWorkspaceTool(tabs, workspace,
 		name = "history_list",
 		description = "Read the append-only branch-preserving workspace history and current HEAD. Nodes cannot be edited or deleted.",
 		toolAnnotations = READ_ONLY,
-	) {
+	) { _, workspace ->
 		mutationResult { workspace.history().toJson() }
 	}
 
-	server.addTool(
+	server.addWorkspaceTool(tabs, workspace,
 		name = "task_start",
 		description = "Create a resumable in-app checkpoint record from the Agent's own dynamic plan. This does not prescribe or approve the workflow.",
 		inputSchema = ToolSchema(
@@ -522,18 +525,18 @@ internal fun createAgentMcpServer(workspace: AgentWorkspace): Server {
 			required = listOf("objective", "plan"),
 		),
 		toolAnnotations = MUTATING,
-	) { request ->
+	) { request, workspace ->
 		mutationResult {
 			workspace.startTask(request.requiredString("objective"), request.stringList("plan")).toJson()
 		}
 	}
 
-	server.addTool(
+	server.addWorkspaceTool(tabs, workspace,
 		name = "task_update",
 		description = "Append a progress/checkpoint event to a long Agent task, including artifact/view/asset/history references.",
 		inputSchema = taskUpdateSchema(),
 		toolAnnotations = MUTATING,
-	) { request ->
+	) { request, workspace ->
 		mutationResult {
 			val status = runCatching { AgentTaskStatus.valueOf(request.requiredString("status").uppercase()) }
 				.getOrElse { throw IllegalArgumentException("Unknown task status") }
@@ -549,7 +552,7 @@ internal fun createAgentMcpServer(workspace: AgentWorkspace): Server {
 		}
 	}
 
-	server.addTool(
+	server.addWorkspaceTool(tabs, workspace,
 		name = "task_get",
 		description = "Read one long task with its Agent-authored plan, status, progress, artifacts and append-only event log.",
 		inputSchema = ToolSchema(
@@ -557,24 +560,24 @@ internal fun createAgentMcpServer(workspace: AgentWorkspace): Server {
 			required = listOf("task_id"),
 		),
 		toolAnnotations = READ_ONLY,
-	) { request -> mutationResult { workspace.task(request.requiredString("task_id")).toJson() } }
+	) { request, workspace -> mutationResult { workspace.task(request.requiredString("task_id")).toJson() } }
 
-	server.addTool(
+	server.addWorkspaceTool(tabs, workspace,
 		name = "task_list",
 		description = "List long tasks persisted for the currently loaded PSD version.",
 		toolAnnotations = READ_ONLY,
-	) {
+	) { _, workspace ->
 		jsonResult(buildJsonObject {
 			putJsonArray("tasks") { workspace.tasks().forEach { add(it.toJson(includeEvents = false)) } }
 		})
 	}
 
-	server.addTool(
+	server.addWorkspaceTool(tabs, workspace,
 		name = "view_render_layer",
 		description = "Render one layer directly from RGBA model data as transparent or checkerboard PNG. This is not a UI screenshot. For differences, separation, or missing-pixel completion, pass this View to Nano Banana Pro/NBP or GPT Image 2; never redraw it with Python/PIL/OpenCV.",
 		inputSchema = viewSchema(includeBackground = true),
 		toolAnnotations = READ_ONLY,
-	) { request ->
+	) { request, workspace ->
 		renderResult {
 			val layerId = request.requiredString("layer_id")
 			val background = request.arguments?.get("background")?.jsonPrimitive?.contentOrNull
@@ -583,12 +586,12 @@ internal fun createAgentMcpServer(workspace: AgentWorkspace): Server {
 		}
 	}
 
-	server.addTool(
+	server.addWorkspaceTool(tabs, workspace,
 		name = "view_render_context",
 		description = "Composite visible layers into one focused PNG around a layer. object_scale below 1 includes surrounding context; this never returns a PSD or UI screenshot. Use it as a reference for Nano Banana Pro/NBP or GPT Image 2 when painted pixels must be changed or reconstructed.",
 		inputSchema = viewSchema(includeBackground = true, includeFocus = true),
 		toolAnnotations = READ_ONLY,
-	) { request ->
+	) { request, workspace ->
 		renderResult {
 			workspace.renderContext(
 				layerId = request.requiredString("layer_id"),
@@ -600,12 +603,12 @@ internal fun createAgentMcpServer(workspace: AgentWorkspace): Server {
 		}
 	}
 
-	server.addTool(
+	server.addWorkspaceTool(tabs, workspace,
 		name = "view_render_model",
 		description = "Evaluate a rig pose, composite selected layers into one PNG, and render only an explicit canvas rectangle or a focused object region. Returns reversible pixel-to-canvas placement metadata.",
 		inputSchema = modelViewSchema(),
 		toolAnnotations = READ_ONLY,
-	) { request ->
+	) { request, workspace ->
 		renderResult {
 			workspace.renderModel(
 				AgentModelViewRequest(
@@ -622,13 +625,13 @@ internal fun createAgentMcpServer(workspace: AgentWorkspace): Server {
 		}
 	}
 
-    server.addTool(
+    server.addWorkspaceTool(tabs, workspace,
         name = "view_check_coverage",
         description = "Measure whether selected layers cover an explicitly expected canvas rectangle at one pose. For scalp gaps select hair layers, not the opaque face underneath. Returns uncovered pixel bounds and a mapped image; the region's semantic expectation is caller-supplied.",
         inputSchema = ToolSchema(properties = JsonObject(requireNotNull(modelViewSchema().properties) + buildJsonObject {
             putJsonObject("alpha_threshold") { put("type","integer"); put("minimum",1); put("maximum",255); put("default",128) }
         }), required = listOf("viewport", "include_layer_ids")), toolAnnotations = READ_ONLY,
-    ) { request ->
+    ) { request, workspace ->
         try {
             val frame=request.viewFrame()
             require(frame is AgentViewFrame.CanvasRect) { "Use canvas_rect for the expected coverage region" }
@@ -643,7 +646,7 @@ internal fun createAgentMcpServer(workspace: AgentWorkspace): Server {
           catch(e: IllegalStateException) { CallToolResult(content=listOf(TextContent(e.message ?: "Cannot render coverage")),isError=true) }
     }
 
-    server.addTool(
+    server.addWorkspaceTool(tabs, workspace,
         name = "view_render_poses",
         description = "Render 1..9 parameter poses with one fixed canvas camera and composition. Each image retains its own View mapping. This is static pose sampling, not a physics simulation.",
         inputSchema = ToolSchema(properties = JsonObject(requireNotNull(modelViewSchema().properties) + buildJsonObject {
@@ -651,7 +654,7 @@ internal fun createAgentMcpServer(workspace: AgentWorkspace): Server {
                 putJsonObject("items") { put("type","object"); putJsonObject("additionalProperties") { put("type","number") } }
             }
         }), required = listOf("viewport", "poses")), toolAnnotations = READ_ONLY,
-    ) { request ->
+    ) { request, workspace ->
         try {
             val poses = request.arguments!!.getValue("poses").jsonArray
             require(poses.size in 1..9)
@@ -672,30 +675,30 @@ internal fun createAgentMcpServer(workspace: AgentWorkspace): Server {
           catch(e: IllegalStateException) { CallToolResult(content=listOf(TextContent(e.message ?: "Cannot render poses")),isError=true) }
     }
 
-    registerAssetWorkflowTools(server, workspace)
+    registerAssetWorkflowTools(server, workspace, tabs)
 
-    server.addTool(
+    server.addWorkspaceTool(tabs, workspace,
         name = "rig_preview",
         description = "Evaluate proposed rig_transform operations without editing or advancing history. Returns compact displacement and triangle diagnostics relative to the input pose. Does not judge painted coverage or appearance.",
         inputSchema = ToolSchema(properties = rigGeometrySchema(true).properties,
             required = listOf("target", "coordinate", "operations")), toolAnnotations = READ_ONLY,
-    ) { request -> mutationResult { workspace.inspectRigGeometry(request.arguments ?: error("Missing arguments")) } }
+    ) { request, workspace -> mutationResult { workspace.inspectRigGeometry(request.arguments ?: error("Missing arguments")) } }
 
-    server.addTool(
+    server.addWorkspaceTool(tabs, workspace,
         name = "object_edit",
         description = "Rename, show/hide, organize or rebind objects. Applies 1..128 ordered edits atomically in one recoverable history commit. Stable IDs are unchanged. Organizational moves and deformation bindings are separate operations.",
         inputSchema = objectEditSchema(), toolAnnotations = MUTATING,
-    ) { request -> mutationResult { workspace.editObjects(request.arguments ?: error("Missing arguments")).toJson() } }
+    ) { request, workspace -> mutationResult { workspace.editObjects(request.arguments ?: error("Missing arguments")).toJson() } }
 
-    server.addTool(
+    server.addWorkspaceTool(tabs, workspace,
         name = "agent_get_workflow",
         description = "Read a short optional reference: overview, geometry, hair, variants, face or assets. Choose only the topic relevant to the task.",
         inputSchema = ToolSchema(properties = buildJsonObject {
             putJsonObject("topic") { put("type", "string"); put("enum", JsonArray(listOf("overview", "geometry", "hair", "variants", "face", "assets").map(::JsonPrimitive))) }
         }), toolAnnotations = READ_ONLY,
-    ) { request -> CallToolResult(content = listOf(TextContent(loadAgentReference(request.optionalString("topic") ?: "overview")))) }
+    ) { request, workspace -> CallToolResult(content = listOf(TextContent(loadAgentReference(request.optionalString("topic") ?: "overview")))) }
 
-    server.addTool(
+    server.addWorkspaceTool(tabs, workspace,
         name = "rig_list_objects",
         description = "Find meshes, Parts and deformers by name or stable ID. Returns compact names, parent relationships and source layer IDs without geometry. Optional query/kind and pagination keep discovery small.",
         inputSchema = ToolSchema(properties = buildJsonObject {
@@ -703,7 +706,7 @@ internal fun createAgentMcpServer(workspace: AgentWorkspace): Server {
             putJsonObject("offset") { put("type","integer");put("minimum",0) }
             putJsonObject("limit") { put("type","integer");put("minimum",1);put("maximum",256);put("default",64) }
         }), toolAnnotations = READ_ONLY,
-    ) { request -> mutationResult {
+    ) { request, workspace -> mutationResult {
         val query=request.optionalString("query")
         val kind=request.optionalString("kind")
         require(kind==null || kind in setOf("mesh","warp","rotation","part")) { "Unknown kind" }
@@ -718,36 +721,36 @@ internal fun createAgentMcpServer(workspace: AgentWorkspace): Server {
             if(offset.toLong()+limit<all.size)put("nextOffset",offset+limit) }
     } }
 
-    server.addTool(
+    server.addWorkspaceTool(tabs, workspace,
         name = "warp_create",
         description = "Create an independent identity Warp for one or more existing meshes under their common Warp parent. Preserves mesh pixels, keyforms, masks and inherited motion. The new lattice uses parent-normalized 0..1 coordinates across the parent frame; requested rows/columns are minima, rounded up together to align parent knots and preserve inherited motion. Inspect actual dimensions with object_get. Use rig_list_objects and object_get first; animate with keyform_set. No special hair-split API is required.",
         inputSchema = rigObjectCreateSchema(false), toolAnnotations = MUTATING,
-    ) { request -> mutationResult {
+    ) { request, workspace -> mutationResult {
         workspace.createWarp(io.github.psd2live.core.RigWarpEdit.fromJson(request.arguments ?: error("Missing arguments")),
             request.requiredString("expected_history_head_node_id"), request.optionalString("task_id")).toJson()
     } }
 
-    server.addTool(
+    server.addWorkspaceTool(tabs, workspace,
         name = "physics_list",
         description = "List explicitly authored independent physics groups. Built-in front/back hair presets are generated separately. Physics drives parameters, not Warp IDs; bind each output to its Warp with keyform_set.",
         inputSchema = ToolSchema(properties = buildJsonObject {}), toolAnnotations = READ_ONLY,
-    ) { mutationResult { buildJsonObject { putJsonArray("groups") { workspace.listPhysics().forEach { add(it.toJson()) } } } } }
+    ) { _, workspace -> mutationResult { buildJsonObject { putJsonArray("groups") { workspace.listPhysics().forEach { add(it.toJson()) } } } } }
 
-    server.addTool(
+    server.addWorkspaceTool(tabs, workspace,
         name = "physics_put",
         description = "Create or replace an independent two-particle Angle-input physics group by ID. Input/output parameters must already exist; each group needs a distinct output parameter and corresponding Warp keyforms. A matching built-in preset ID or output is replaced by this custom group. Adjustable length, mobility, delay, acceleration and output_scale. Enables physics in the same history commit and exports to physics3.json and editable CMO3 outside mesh-only mode.",
         inputSchema = rigObjectCreateSchema(true), toolAnnotations = MUTATING,
-    ) { request -> mutationResult {
+    ) { request, workspace -> mutationResult {
         workspace.putPhysics(io.github.psd2live.core.RigPhysicsEdit.fromJson(request.arguments ?: error("Missing arguments")),
             request.requiredString("expected_history_head_node_id"), request.optionalString("task_id")).toJson()
     } }
 
-    server.addTool(
+    server.addWorkspaceTool(tabs, workspace,
         name = "asset_inspect",
         description = "Inspect actual staged PNG pixels, spatial placement and transparency counts. Use for quick usability/alpha diagnosis, then trial assembly. Overlapping hair, minor tone differences and hidden-root/edge variation are not automatic rejection reasons; judge depth, seams and intended motion in composition.",
         inputSchema = ToolSchema(properties = buildJsonObject { putJsonObject("asset_id") { put("type", "string") } }, required = listOf("asset_id")),
         toolAnnotations = READ_ONLY,
-    ) { request ->
+    ) { request, workspace ->
         try {
             val preview = workspace.inspectAsset(request.requiredString("asset_id"))
             val metadata = buildJsonObject {
@@ -762,12 +765,12 @@ internal fun createAgentMcpServer(workspace: AgentWorkspace): Server {
         }
     }
 
-	server.addTool(
+	server.addWorkspaceTool(tabs, workspace,
 		name = "asset_import_png",
         description = "Stage a PNG from painting, vector rasterization, original pixels or image generation. Omit solid_background to retain native alpha; specify it only for deliberate matte removal. reference_id imports need placement registration. Legacy spatial_reference_id imports remain supported.",
 		inputSchema = pngImportSchema(),
 		toolAnnotations = MUTATING,
-	) { request ->
+	) { request, workspace ->
 		mutationResult {
 			val sourceRect = request.arguments?.get("source_pixel_rect")?.jsonObject?.let { rect ->
 				fun coordinate(name: String): Int = rect[name]?.jsonPrimitive?.intOrNull
@@ -789,12 +792,12 @@ internal fun createAgentMcpServer(workspace: AgentWorkspace): Server {
 		}
 	}
 
-	server.addTool(
+	server.addWorkspaceTool(tabs, workspace,
 		name = "layer_add_from_asset",
 		description = "Add a staged PNG as a real editable source layer, generate its mesh/rig through the normal pipeline, and append one immutable history node. No approval step is required.",
 		inputSchema = addLayerSchema(),
 		toolAnnotations = MUTATING,
-	) { request ->
+	) { request, workspace ->
 		mutationResult {
 			workspace.addLayer(
 				AgentAddLayerRequest(
@@ -817,7 +820,7 @@ internal fun createAgentMcpServer(workspace: AgentWorkspace): Server {
 		}
 	}
 
-	server.addTool(
+	server.addWorkspaceTool(tabs, workspace,
 		name = "layer_soft_delete",
 		description = "Remove a layer from the active model without erasing its pixels or history. It remains recoverable by history_checkout.",
 		inputSchema = ToolSchema(
@@ -829,7 +832,7 @@ internal fun createAgentMcpServer(workspace: AgentWorkspace): Server {
 			required = listOf("layer_id", "expected_history_head_node_id"),
 		),
 		toolAnnotations = MUTATING,
-	) { request ->
+	) { request, workspace ->
 		mutationResult {
 			workspace.softDeleteLayer(
 				layerId = request.requiredString("layer_id"),
@@ -839,7 +842,7 @@ internal fun createAgentMcpServer(workspace: AgentWorkspace): Server {
 		}
 	}
 
-	server.addTool(
+	server.addWorkspaceTool(tabs, workspace,
 		name = "history_checkout",
 		description = "Move workspace HEAD to any immutable history node and rebuild that exact editable source/rig state. Old branches remain available.",
 		inputSchema = ToolSchema(
@@ -849,7 +852,7 @@ internal fun createAgentMcpServer(workspace: AgentWorkspace): Server {
 			required = listOf("node_id"),
 		),
 		toolAnnotations = MUTATING,
-	) { request ->
+	) { request, workspace ->
 		mutationResult { workspace.checkoutHistory(request.requiredString("node_id")).toJson() }
 	}
 
@@ -870,7 +873,7 @@ internal fun createAgentMcpServer(workspace: AgentWorkspace): Server {
 		mimeType = "application/json",
 	) { request ->
 		ReadResourceResult(
-			contents = listOf(TextResourceContents(workspace.snapshot().toJson(true).toString(), request.uri, "application/json")),
+			contents = listOf(TextResourceContents((tabs?.manifest() ?: workspace.snapshot().toJson(true)).toString(), request.uri, "application/json")),
 		)
 	}
 
@@ -1565,6 +1568,7 @@ private fun AgentProjectSnapshot.toJson(
 	canvasHeight?.let { put("canvasHeight", it) }
 	put("busy", busy)
 	put("status", status)
+    errorMessage?.let { put("errorMessage", it) }
 	put("persistenceStatus", persistenceStatus)
 	persistenceError?.let { put("persistenceError", it) }
 	selectedLayerId?.let { put("selectedLayerId", it) }

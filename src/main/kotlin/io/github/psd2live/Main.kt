@@ -3,18 +3,16 @@ package io.github.psd2live
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
-import androidx.compose.ui.window.WindowState
 import androidx.compose.ui.window.application
 import io.github.psd2live.agent.AgentMcpService
-import io.github.psd2live.agent.ViewModelAgentWorkspace
 import io.github.psd2live.core.PSD2LivePipeline
 import io.github.psd2live.core.PipelineConfig
 import io.github.psd2live.core.ProgressListener
 import io.github.psd2live.i18n.AppLanguage
 import io.github.psd2live.i18n.I18n
 import io.github.psd2live.i18n.tr
-import io.github.psd2live.ui.state.PSD2LiveViewModel
-import io.github.psd2live.ui.views.PSD2LiveApp
+import io.github.psd2live.ui.views.DesktopTabsApp
+import io.github.psd2live.ui.state.DesktopProjectTabs
 import java.nio.file.Path
 import kotlin.io.path.absolutePathString
 
@@ -23,19 +21,18 @@ import androidx.compose.ui.window.rememberWindowState
 fun main(arguments: Array<String>) {
 	configureLanguage(arguments)
 	if (arguments.isEmpty()) {
-		val viewModel = PSD2LiveViewModel()
-		val agentWorkspace = ViewModelAgentWorkspace(viewModel)
-		viewModel.attachAgentWorkspace(agentWorkspace)
+		val tabs = DesktopProjectTabs()
+        val agentWorkspace = tabs.state.value.tabs.first().workspace
 		var agentMcpService: AgentMcpService? = null
 		val agentMcpStartup = runCatching {
-			AgentMcpService(agentWorkspace)
+			AgentMcpService(agentWorkspace, tabs = tabs.agents)
 				.also { agentMcpService = it }
 				.start()
 		}
 
 		val shutdown = {
 			runCatching { agentMcpService?.close() }
-			runCatching { viewModel.close() }
+			runCatching { tabs.close() }
 		}
 		val shutdownHook = Thread({
 			shutdown()
@@ -46,7 +43,7 @@ fun main(arguments: Array<String>) {
 			application {
 				val windowState = rememberWindowState(size = DpSize(1280.dp, 820.dp))
 				val closeApp: () -> Unit = {
-					viewModel.withSavedChanges {
+					tabs.requestCloseAll {
 						shutdown()
 						exitApplication()
 					}
@@ -57,13 +54,13 @@ fun main(arguments: Array<String>) {
 					state = windowState,
 					undecorated = true,
 				) {
-					PSD2LiveApp(
-						viewModel = viewModel,
+					DesktopTabsApp(
+						controller = tabs,
 						window = window,
 						windowState = windowState,
-						onCloseRequest = closeApp,
-						agentConnectionInfo = agentMcpStartup.getOrNull(),
-						agentStartupError = agentMcpStartup.exceptionOrNull()?.message,
+						onClose = closeApp,
+						connection = agentMcpStartup.getOrNull(),
+						startupError = agentMcpStartup.exceptionOrNull()?.message,
 					)
 				}
 			}

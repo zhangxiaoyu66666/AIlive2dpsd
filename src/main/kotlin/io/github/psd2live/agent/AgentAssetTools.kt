@@ -5,23 +5,23 @@ import io.modelcontextprotocol.kotlin.sdk.types.*
 import kotlinx.serialization.json.*
 import java.util.Base64
 
-internal fun registerAssetWorkflowTools(server: Server, workspace: AgentWorkspace) {
+internal fun registerAssetWorkflowTools(server: Server, workspace: AgentWorkspace, tabs: AgentWorkspaceTabs? = null) {
     val descriptions = mapOf(
         "asset_prepare_reference" to "Prepare a persistent generation reference from a SOURCE layer: clean image and separately annotated context, canvas mapping, target anchors, existing parent Warp and chosen solid matte. The matte is reference context; outputs may retain native alpha or explicitly declare their actual matte. Anchor x/y are source canvas coordinates; source_canvas_rect is optional crop. Images are returned clean first, annotated context second.",
         "asset_register" to "Create an immutable placement instance without changing pixels or model. mode=frame maps declared generated_pixel_rect to source_canvas_rect (defaults to complete PNG/reference); mode=landmarks fits generated_anchors (PNG pixel coordinates) to target_anchors (canvas); mode=absolute sets transform. x/y locate the original PNG origin, not its alpha crop. Reflection requires mirror_x/mirror_y, unequal scales require allow_stretch. Returns actual transformed raster and orientation/fit diagnostics; preview composite next.",
         "asset_preview_composite" to "Preview placed assets in source-canvas context without adding layers or affecting rig analysis. placements are in painter order, each with registration_id, optional insertion=top/bottom/above/below and reference_layer_id. Explicit replace_layer_ids exclude original source to avoid false duplication. Natural overlap is expected. Returns source-raster preview, not a posed inverse transform.",
         "asset_reprocess" to "Reprocess a saved ORIGINAL generated PNG using actual solid_background, tolerance and optional foreground/background seed points plus edge_width in original PNG pixels. Returns a new immutable processed asset; register it again. Never resamples the already placed layer.",
     )
-    for ((name, description) in descriptions) server.addTool(
+    for ((name, description) in descriptions) server.addWorkspaceTool(tabs, workspace,
         name=name, description=description, inputSchema=assetWorkflowSchema(name),
         toolAnnotations=ToolAnnotations(readOnlyHint=name=="asset_preview_composite",destructiveHint=false,idempotentHint=name=="asset_preview_composite",openWorldHint=false),
-    ) { request ->
+    ) { request, workspace ->
         try {
             val result=workspace.assetWorkflow(name,request.arguments ?: JsonObject(emptyMap()))
             CallToolResult(content=listOf(TextContent(result.metadata.toString()))+result.images.map { ImageContent(Base64.getEncoder().encodeToString(it),"image/png") },structuredContent=result.metadata)
         } catch(e: IllegalArgumentException) { workflowError(e) } catch(e: IllegalStateException) { workflowError(e) }
     }
-    for (name in listOf("layer_set_placement","layer_finalize_placement")) server.addTool(
+    for (name in listOf("layer_set_placement","layer_finalize_placement")) server.addWorkspaceTool(tabs, workspace,
         name=name,
         description=if(name=="layer_set_placement") "Reposition an imported layer from an absolute registration instance, retaining its existing parent Warp and inherited motion. No unbound layer is created. Dedicated Warp/keyforms or finalized placement are protected. Uses original processed pixels, not a previous resampling. Requires current history HEAD."
             else "Mark registered placement complete while retaining the existing parent Warp and inherited animation. Rebuild and verify neutral placement before commit. Then author optional dedicated Warp/physics. Does not unbind or move existing rigged subtrees.",
@@ -29,7 +29,7 @@ internal fun registerAssetWorkflowTools(server: Server, workspace: AgentWorkspac
             for(key in listOf("layer_id","registration_id","expected_history_head_node_id","task_id")) putJsonObject(key) { put("type","string") }
         },required=listOf("layer_id","expected_history_head_node_id")+if(name=="layer_set_placement") listOf("registration_id") else emptyList()),
         toolAnnotations=ToolAnnotations(readOnlyHint=false,destructiveHint=false,idempotentHint=false,openWorldHint=false),
-    ) { request ->
+    ) { request, workspace ->
         try {
             val a=request.arguments ?: JsonObject(emptyMap())
             val result=if(name=="layer_set_placement") workspace.setLayerPlacement(a.text("layer_id"),a.text("registration_id"),a.text("expected_history_head_node_id"),a["task_id"]?.jsonPrimitive?.content)

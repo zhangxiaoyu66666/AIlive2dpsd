@@ -31,6 +31,7 @@ import androidx.compose.material.LinearProgressIndicator
 import androidx.compose.material.ProgressIndicatorDefaults
 import androidx.compose.material.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import kotlinx.coroutines.delay
 import androidx.compose.runtime.collectAsState
@@ -96,6 +97,10 @@ fun FrameWindowScope.PSD2LiveApp(
 	windowState: WindowState? = null,
 	agentConnectionInfo: AgentMcpConnectionInfo? = null,
 	agentStartupError: String? = null,
+	onOpenPath: ((Path) -> Unit)? = null,
+    onNewTab: (() -> Unit)? = null,
+    onCloseTab: (() -> Unit)? = null,
+    projectTabs: @Composable () -> Unit = {},
 	onCloseRequest: () -> Unit = {
 		viewModel.close()
 		window?.dispose()
@@ -114,7 +119,7 @@ fun FrameWindowScope.PSD2LiveApp(
 	val currentLanguage = state.currentLanguage
 
 	// Window Drop Target for PSD Drag & Drop
-	LaunchedEffect(window) {
+	DisposableEffect(window, viewModel) {
 		window?.dropTarget = DropTarget(window, DnDConstants.ACTION_COPY, object : DropTargetAdapter() {
 			override fun drop(event: DropTargetDropEvent) {
 				try {
@@ -122,7 +127,8 @@ fun FrameWindowScope.PSD2LiveApp(
 					@Suppress("UNCHECKED_CAST")
 					val files = event.transferable.getTransferData(DataFlavor.javaFileListFlavor) as List<File>
 					files.firstOrNull { it.extension.lowercase() in setOf("psd", "psd2live") }?.let { file ->
-                        if (file.extension.equals("psd2live", true)) viewModel.openProject(file.toPath())
+                        if (onOpenPath != null) onOpenPath(file.toPath())
+                        else if (file.extension.equals("psd2live", true)) viewModel.openProject(file.toPath())
                         else viewModel.withSavedChanges { viewModel.setInputPath(file.absolutePath); viewModel.analyze() }
                     }
 					event.dropComplete(true)
@@ -131,6 +137,7 @@ fun FrameWindowScope.PSD2LiveApp(
 				}
 			}
 		}, true)
+        onDispose { window?.dropTarget = null }
 	}
 
 	CompactToolTheme {
@@ -178,7 +185,8 @@ fun FrameWindowScope.PSD2LiveApp(
 			if (!isBusy) {
 				val selected = NativeFilePicker.choosePsdFile(window, state.inputPath)
 				if (!selected.isNullOrBlank()) {
-					viewModel.withSavedChanges { viewModel.setInputPath(selected); viewModel.analyze() }
+					if (onOpenPath != null) onOpenPath(Path.of(selected))
+                    else viewModel.withSavedChanges { viewModel.setInputPath(selected); viewModel.analyze() }
 				}
 			}
 		}
@@ -186,7 +194,7 @@ fun FrameWindowScope.PSD2LiveApp(
 		val onOpenProjectAction: () -> Unit = {
 			val selected = NativeFilePicker.chooseProjectFile(window, state.projectFile)
 			if (!selected.isNullOrBlank()) {
-				viewModel.openProject(java.nio.file.Path.of(selected))
+				if (onOpenPath != null) onOpenPath(Path.of(selected)) else viewModel.openProject(Path.of(selected))
 			}
 		}
         val onReanalyzeAction = {
@@ -208,6 +216,8 @@ fun FrameWindowScope.PSD2LiveApp(
 				.onPreviewKeyEvent { event ->
 					if (event.type == KeyEventType.KeyDown && event.isCtrlPressed) {
 						when (event.key) {
+                            Key.N -> { onNewTab?.invoke(); onNewTab != null }
+                            Key.W -> { onCloseTab?.invoke(); onCloseTab != null }
 							Key.O -> {
                                 if (event.isShiftPressed) onOpenPsdAction() else onOpenProjectAction()
 								true
@@ -263,7 +273,8 @@ fun FrameWindowScope.PSD2LiveApp(
 						onShowAbout = { showAboutDialog = true },
 					)
 				}
-				// Main Center Area: Split Pane between Workspace (Left) and Inspector (Right)
+				projectTabs()
+                // Main Center Area: Split Pane between Workspace (Left) and Inspector (Right)
 				BoxWithConstraints(
 					modifier = Modifier
 						.weight(1f)

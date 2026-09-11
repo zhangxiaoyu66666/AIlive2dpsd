@@ -169,7 +169,7 @@ afterEvaluate {
 			val appDir = desktopDistributionRoot.get().dir("main/app/PSD2Live/app").asFile
 			if (appDir.exists()) {
 				copy {
-					from("LICENSE", "THIRD_PARTY_NOTICES.md", "docs/eye-rig-reliability.md", "docs/native-file-picker.md")
+					from("LICENSE", "THIRD_PARTY_NOTICES.md", "docs/eye-rig-reliability.md", "docs/native-file-picker.md", "docs/project-tabs.md")
 					into(appDir.parentFile)
 				}
 				copy {

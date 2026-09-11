@@ -22,6 +22,7 @@ data class AgentProjectSnapshot(
     val projectSaveError: String? = null,
     val persistenceStatus: String = "memory_only",
 	val persistenceError: String? = null,
+    val errorMessage: String? = null,
 )
 
 data class AgentParameterSnapshot(

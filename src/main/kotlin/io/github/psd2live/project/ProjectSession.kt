@@ -18,6 +18,7 @@ internal class ProjectSession(private val viewModel: PSD2LiveViewModel, private 
         viewModel.projectSaveStarted()
         var staging: Path? = null
         try {
+            viewModel.claimProjectPath(path)
             val capture = workspace.captureProject("Save project", actor)
             return saves.withLock {
             workspace.flushProjectPersistence()
@@ -62,6 +63,7 @@ internal class ProjectSession(private val viewModel: PSD2LiveViewModel, private 
     }
 
     suspend fun open(workspace: ViewModelAgentWorkspace, path: Path) = saves.withLock {
+        viewModel.claimProjectPath(path)
         val expected = viewModel.state.value
         val root = withContext(Dispatchers.IO) { ProjectArchive.extract(path) }
         try {
