@@ -125,10 +125,7 @@ class SeeThroughClient(private val http: HttpClient = HttpClient(CIO) {
     internal suspend fun download(endpoint: String, eventId: String, file: JsonObject, destination: Path, progress: (WorkflowProgressUpdate) -> Unit = {}): Path {
         val base = endpoint(endpoint); validateEvent(eventId)
         val url = file["url"]?.jsonPrimitive?.content ?: error("Result has no download URL")
-        val download = URI(base).resolve(url)
-        require(download.scheme == URI(base).scheme && download.authority == URI(base).authority && download.path.startsWith("/gradio_api/file=")) {
-            "See-Through returned an unexpected download location"
-        }
+        val download = GradioFileUrl.resolve(base, url)
         return withContext(Dispatchers.IO) {
             Files.createDirectories(destination)
             val target = destination.resolve("see-through-$eventId.psd")

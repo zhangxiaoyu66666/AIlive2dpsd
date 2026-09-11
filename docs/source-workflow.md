@@ -40,6 +40,12 @@
 
 ## 验证入口
 
+### Windows 结果链接恢复
+
+Gradio 的 `file=` 链接可能直接拼接 Windows 文件路径。下载器先验证同源服务和文件路由，再通过现有 Ktor `encodeURLPath(encodeEncoded=false)` 编码路径中的反斜杠、空格和其他特殊字符，同时保留已有 URL 转义。直接下载与缓存结果恢复共用此处理，不改写服务端文件，也不因下载失败重新提交推理。[Ktor 路径编码契约](https://api.ktor.io/ktor-http/io.ktor.http/encode-u-r-l-path.html)与 [Gradio 文件路由](https://gradio.app/guides/file-access)于 2026-09-12 核对。
+
+验收：199 项测试通过，覆盖原始 Windows 路径、中文与空格、已编码路径、同源约束、下载失败后保留事件描述并恢复。`sourceWorkflowResumeCheck` 用这次真实失败任务保存的结果描述执行 HTTP 下载，接收 7,658,110 字节，与原文件 SHA-256 一致；真实 Compose 页面已显示 20 个图层的结果预览。此检查不上传、不提交推理，也不操作桌面窗口。日志/截图位于 `build/windows-download-release.log`、`build/windows-download-qa/recovered.png`，新版位于 `build/compose/windows-download-binaries/main/app/PSD2Live`；打包 JVM 原生初始化检查通过。
+
 ### 进度反馈
 
 API 页面顶部显示独立进度区：当前阶段、动态进度条和本次操作已用时。上传与下载按真实传输字节计算百分比；拆图接口只报告状态时使用不定进度，不估造完成比例或剩余时间。超过 30 秒未收到拆图状态会提示等待情况，原有 90 秒无更新超时会转成可恢复错误。

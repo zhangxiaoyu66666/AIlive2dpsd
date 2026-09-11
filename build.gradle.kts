@@ -303,3 +303,15 @@ tasks.register<JavaExec>("workflowProgressPageCheck") {
         args(providers.gradleProperty("workflowImage").get(), providers.gradleProperty("workflowPsd").get(), providers.gradleProperty("workflowOutput").get())
     }
 }
+
+tasks.register<JavaExec>("sourceWorkflowResumeCheck") {
+    dependsOn(tasks.testClasses)
+    classpath = sourceSets["test"].runtimeClasspath
+    mainClass.set("io.github.psd2live.workflow.SourceWorkflowResumeCheck")
+    javaLauncher.set(javaToolchains.launcherFor { languageVersion.set(JavaLanguageVersion.of(21)) })
+    maxHeapSize = "4g"
+    systemProperty("java.awt.headless", "true")
+    doFirst {
+        args(providers.gradleProperty("workflowMetadata").get(), providers.gradleProperty("workflowOutput").get(), providers.gradleProperty("workflowImage").get())
+    }
+}
