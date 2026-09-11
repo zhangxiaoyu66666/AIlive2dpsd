@@ -385,6 +385,14 @@ internal fun createAgentMcpServer(workspace: AgentWorkspace): Server {
 		}
 	}
 
+    server.addTool(name="mesh_inspect", description="Inspect per-layer effective mesh settings, counts, masks and source-alpha coverage. Uses texture coordinates, independent of pose and foreground occlusion. Call object_get for keyed opacity/draw order values.",
+        inputSchema=meshToolSchema(false), toolAnnotations=READ_ONLY) { request ->
+        mutationResult { workspace.inspectMeshes(requireNotNull(request.arguments)) }
+    }
+    server.addTool(name="mesh_settings_set", description="Set or reset source-pixel mesh settings for up to 32 layers in one history commit. Preserves source textures, non-target layers and channel edits. Refuses vertex-authored mesh keyforms/glue; does not silently erase them. Old projects retain their recorded generation version. Inspect mesh_inspect and history HEAD first.",
+        inputSchema=meshToolSchema(true), toolAnnotations=MUTATING) { request ->
+        mutationResult { workspace.setMeshSettings(requireNotNull(request.arguments)).toJson() }
+    }
     server.addTool(name="rig_inspect", description="Budgeted geometry inspection at coordinate: summary (default, representation and native control availability, no points), or points (paged up to 256). Local or evaluated canvas coordinates. Does not dump all keyforms.",
         inputSchema=rigGeometrySchema(false), toolAnnotations=READ_ONLY) { request ->
         mutationResult { workspace.inspectRigGeometry(requireNotNull(request.arguments)) }
@@ -396,7 +404,7 @@ internal fun createAgentMcpServer(workspace: AgentWorkspace): Server {
 
 	server.addTool(
 		name = "keyform_set",
-		description = "Set or update keyform geometry and/or channels (opacity, draw order, multiply/screen color, glue intensity) on a target at an exact N-D parameter coordinate.",
+		description = "Set or update keyform geometry and/or channels (opacity, draw order, multiply/screen color, glue intensity) on a target at an exact N-D parameter coordinate. This is not a constant-channel setter: other seeded cells can retain their previous values. Read object_get channel cells and set every intended coordinate.",
 		inputSchema = keyformSetSchema(),
 		toolAnnotations = MUTATING,
 	) { request ->
@@ -1662,7 +1670,7 @@ internal fun AgentWorkspaceMutationResult.toJson(): JsonObject = buildJsonObject
 	putJsonArray("affectedObjectIds") { affectedObjectIds.forEach { add(JsonPrimitive(it)) } }
 }
 
-private fun AgentObjectSnapshot.toJson(): JsonObject = buildJsonObject {
+internal fun AgentObjectSnapshot.toJson(): JsonObject = buildJsonObject {
 	putJsonObject("target") {
 		put("kind", target.kind)
 		put("id", target.id)
@@ -1716,6 +1724,7 @@ private fun AgentObjectSnapshot.toJson(): JsonObject = buildJsonObject {
 					put("channel", track.channel)
 					put("staticValue", track.staticValue)
 					put("keyformCount", track.keyformCount)
+                    put("cells", JsonArray(track.cells))
 					putJsonArray("axes") {
 						track.axes.forEach { axis ->
 							add(buildJsonObject {

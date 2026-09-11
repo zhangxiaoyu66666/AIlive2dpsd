@@ -239,6 +239,7 @@ data class AgentObjectChannelTrackSnapshot(
 	val staticValue: String,
 	val axes: List<AgentObjectAxisSnapshot>,
 	val keyformCount: Int,
+    val cells: List<kotlinx.serialization.json.JsonObject> = emptyList(),
 )
 
 data class AgentObjectSnapshot(
@@ -388,6 +389,8 @@ interface AgentWorkspace {
         kotlinx.serialization.json.JsonObject(mapOf("kind" to kotlinx.serialization.json.JsonPrimitive(it.kind), "id" to kotlinx.serialization.json.JsonPrimitive(it.id)))
     }
     suspend fun editObjects(arguments: kotlinx.serialization.json.JsonObject): AgentWorkspaceMutationResult = throw UnsupportedOperationException("Object editing unavailable")
+    fun inspectMeshes(arguments: kotlinx.serialization.json.JsonObject): kotlinx.serialization.json.JsonObject = throw UnsupportedOperationException("Mesh inspection unavailable")
+    suspend fun setMeshSettings(arguments: kotlinx.serialization.json.JsonObject): AgentWorkspaceMutationResult = throw UnsupportedOperationException("Mesh editing unavailable")
     fun inspectRigGeometry(arguments: kotlinx.serialization.json.JsonObject): kotlinx.serialization.json.JsonObject = throw UnsupportedOperationException("Rig geometry inspection unavailable")
     suspend fun transformRigGeometry(arguments: kotlinx.serialization.json.JsonObject): AgentWorkspaceMutationResult = throw UnsupportedOperationException("Rig transforms unavailable")
     suspend fun assetWorkflow(operation: String, arguments: kotlinx.serialization.json.JsonObject): AgentWorkflowResult = throw UnsupportedOperationException("Asset workflow is unavailable")

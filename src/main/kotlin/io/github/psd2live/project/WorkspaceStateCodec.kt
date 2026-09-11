@@ -20,6 +20,7 @@ internal object WorkspaceStateCodec {
         parameterValues = if (state.animationEnabled) state.parameterValues.filterKeys { it in state.lockedParameters } else state.parameterValues,
     ))
     fun settings(state: PSD2LiveState): JsonObject = buildJsonObject {
+        put("rigGenerationVersion", state.rigGenerationVersion)
         put("atlasSize", state.atlasSize)
         put("meshSpacing", state.meshSpacing)
         put("meshOuterMargin", state.meshOuterMargin)
@@ -81,6 +82,7 @@ internal object WorkspaceStateCodec {
         put("canvasPanX", state.canvasPanX)
         put("canvasPanY", state.canvasPanY)
         put("outputPath", state.outputPath)
+        put("rigGenerationVersion", state.rigGenerationVersion)
         put("atlasSize", state.atlasSize)
         put("meshSpacing", state.meshSpacing)
         put("meshOuterMargin", state.meshOuterMargin)
@@ -172,6 +174,7 @@ internal object WorkspaceStateCodec {
         canvasPanX = value["canvasPanX"]?.jsonPrimitive?.float ?: base.canvasPanX,
         canvasPanY = value["canvasPanY"]?.jsonPrimitive?.float ?: base.canvasPanY,
         outputPath = value["outputPath"]?.jsonPrimitive?.content ?: base.outputPath,
+        rigGenerationVersion = (value["rigGenerationVersion"]?.jsonPrimitive?.int ?: 1).also { require(it in 1..2) { "Unsupported rig generation version: $it" } },
         atlasSize = value["atlasSize"]?.jsonPrimitive?.int ?: base.atlasSize,
         meshSpacing = value["meshSpacing"]?.jsonPrimitive?.int ?: base.meshSpacing,
         meshOuterMargin = value["meshOuterMargin"]?.jsonPrimitive?.float ?: base.meshOuterMargin,

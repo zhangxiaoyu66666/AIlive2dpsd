@@ -303,16 +303,30 @@ class PSD2LiveViewModel : AutoCloseable {
 	}
 
 	fun setPartMeshSettings(layerId: String, settings: MeshSettings) {
+        if (!canRemeshLayer(layerId)) return
 		_state.update { it.copy(meshOverrides = it.meshOverrides + (layerId to settings)) }
 		schedulePreviewRebuild()
 	    editorChanged()
 	}
 
 	fun resetPartMeshSettings(layerId: String) {
+        if (!canRemeshLayer(layerId)) return
 		_state.update { it.copy(meshOverrides = it.meshOverrides - layerId) }
 		schedulePreviewRebuild()
 	    editorChanged()
 	}
+
+    private fun canRemeshLayer(layerId: String): Boolean {
+        val current = _state.value
+        val rig = current.previewModel?.rig ?: return false
+        return try {
+            io.github.psd2live.core.requireLayerRemeshable(current.rigEdits, rig.puppet, rig.layerIdByDrawableId, listOf(layerId))
+            true
+        } catch (failure: IllegalArgumentException) {
+            _state.update { it.copy(errorMessage = failure.message) }
+            false
+        }
+    }
 
 	fun setHeadStrength(strength: Float) {
 		_state.update { it.copy(headStrength = strength.coerceIn(0f, 4f)) }
@@ -1281,7 +1295,7 @@ class PSD2LiveViewModel : AutoCloseable {
 				)
 			}
 			try {
-				val config = _state.value.copy(layerVisibility = emptyMap(), layerOverrides = emptyMap(), deletedLayerIds = emptySet(), parentOverrides = emptyMap(), rigEdits = RigEditOverlay.Empty).buildConfig()
+				val config = _state.value.copy(rigGenerationVersion = 2, layerVisibility = emptyMap(), layerOverrides = emptyMap(), deletedLayerIds = emptySet(), parentOverrides = emptyMap(), rigEdits = RigEditOverlay.Empty).buildConfig()
 				val preview = withContext(Dispatchers.Default) {
 					pipeline.buildPreview(input, config)
 				}
@@ -1308,6 +1322,7 @@ class PSD2LiveViewModel : AutoCloseable {
 					current.withLogs(logLinesList, level = LogLevel.INFO, tag = "Analysis").copy(
 						isIndeterminateProgress = false,
 						projectId = java.util.UUID.randomUUID().toString(),
+                        rigGenerationVersion = 2,
                         projectSourceName = input.fileName.toString(),
                         projectFile = null, projectDirty = true, showProjectLocationDialog = false, isAnalyzing = true,
                         layerVisibility = emptyMap(), layerOverrides = emptyMap(), deletedLayerIds = emptySet(), parentOverrides = emptyMap(), rigEdits = RigEditOverlay.Empty,
@@ -1473,6 +1488,7 @@ class PSD2LiveViewModel : AutoCloseable {
 			io.github.psd2live.project.WorkspaceStateCodec.decode(settings, current).copy(
 				analysis = preview.analysis,
 				previewModel = preview,
+                meshOverrides = preview.config.meshOverrides,
 				layerVisibility = layerVisibility,
 				deletedLayerIds = deletedLayerIds,
 				layerOverrides = layerOverrides,

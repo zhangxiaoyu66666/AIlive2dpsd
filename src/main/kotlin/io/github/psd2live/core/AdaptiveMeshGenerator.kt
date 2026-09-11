@@ -83,21 +83,33 @@ internal object AdaptiveMeshGenerator {
 		outerMargin: Float = min(2.75f, max(0.8f, spacing * 0.10f)),
 		innerMargin: Float = min(2.75f, max(0.8f, spacing * 0.10f)),
 		innerMarginEnabled: Boolean = true,
+        preserveSourceAlpha: Boolean = true,
 	): Result? {
 		if (width <= 0 || height <= 0 || width.toLong() * height * 4 > rgba.size ||
 			!spacing.isFinite() || !interiorSpacing.isFinite() ||
 			!outerMargin.isFinite() || !innerMargin.isFinite()) return null
 		val threshold = alphaThreshold.coerceIn(1, 255)
-		val hardened = AlphaEdgePreprocessor.process(width, height, rgba, threshold)
-		val geometryRgba = hardened?.rgba ?: ByteArray(rgba.size)
-		// Smoothing must neither bridge a transparent gap nor erase a bright one-pixel stroke
-		// beside a much thicker island. Texture alpha itself remains untouched.
-		for (pixel in 0 until width * height) {
-			val offset = pixel * 4 + 3
-			val sourceAlpha = rgba[offset].toInt() and 0xff
-			if (sourceAlpha < threshold) geometryRgba[offset] = 0
-			else if (sourceAlpha >= (hardened?.hardThreshold ?: threshold)) geometryRgba[offset] = -1
-		}
+        val geometryRgba = if (preserveSourceAlpha) {
+            // Honor the source-alpha threshold, including soft fringes. Texture is untouched.
+            ByteArray(rgba.size).also { mask ->
+                for (pixel in 0 until width * height) {
+                    val offset = pixel * 4 + 3
+                    if ((rgba[offset].toInt() and 0xff) >= threshold) mask[offset] = -1
+                }
+            }
+        } else {
+            // Reproduce v1 exactly for saved projects with vertex-indexed keyforms.
+            val hardened = AlphaEdgePreprocessor.process(width, height, rgba, threshold)
+            (hardened?.rgba ?: ByteArray(rgba.size)).also { mask ->
+                for (pixel in 0 until width * height) {
+                    val offset = pixel * 4 + 3
+                    val sourceAlpha = rgba[offset].toInt() and 0xff
+                    if (sourceAlpha < threshold) mask[offset] = 0
+                    else if (sourceAlpha >= (hardened?.hardThreshold ?: threshold)) mask[offset] = -1
+                }
+            }
+        }
+
 		// One-pixel tolerance can simplify a one-pixel rectangle into a triangle, clipping half
 		// of a hairline before meshing even starts. Keep subpixel contour accuracy here.
 		val alpha = analyzeAlpha(width, height, geometryRgba, 1, contourEpsilon = 0.35f) ?: return null
@@ -107,18 +119,16 @@ internal object AdaptiveMeshGenerator {
 		val fitSources = alpha.contours.zip(fitContours).associate { (exact, fit) -> exact.points to fit.points }
 		val outerCandidates = alpha.contours.filter { !it.isHole && it.points.size >= 6 }
 		if (outerCandidates.isEmpty()) return null
-		val areas = outerCandidates.map { contourArea(it.points) }
-		val largestIndex = areas.indices.maxByOrNull { areas[it] } ?: return null
-		val minimumSecondaryArea = max(6.0, min(24.0, areas[largestIndex] * 0.0002))
-		val outerContours = outerCandidates.filterIndexed { index, _ ->
-			index == largestIndex || areas[index] >= minimumSecondaryArea
-		}
-		if (outerContours.isEmpty()) return null
+        // Detached lash tips and small brow strokes still belong to the source artwork.
+        val areas = outerCandidates.map { contourArea(it.points) }
+        val largest = areas.indices.maxBy { areas[it] }
+        val minimumSecondaryArea = max(6.0, min(24.0, areas[largest] * 0.0002))
+        val outerContours = if (preserveSourceAlpha) outerCandidates else outerCandidates.filterIndexed { i, _ -> i == largest || areas[i] >= minimumSecondaryArea }
 
 		val solidMask = SolidAlphaMask(width, height, geometryRgba)
 		val budgetSpacing = sqrt(width.toDouble() * height / (1_200.0 * 0.8660254037844386))
-		val edgeSpacing = max(6.0, spacing.toDouble())
-		val gridSpacing = max(max(6.0, interiorSpacing.toDouble()), budgetSpacing)
+		val edgeSpacing = max(if (preserveSourceAlpha) 1.0 else 6.0, spacing.toDouble())
+		val gridSpacing = max(max(if (preserveSourceAlpha) 2.0 else 6.0, interiorSpacing.toDouble()), budgetSpacing)
 		val sources = outerContours.map { it.points }
 		val holesByOuter = Array(sources.size) { mutableListOf<IntArray>() }
 		for (hole in alpha.contours.filter { it.isHole && it.points.size >= 6 }) {
@@ -172,14 +182,14 @@ internal object AdaptiveMeshGenerator {
 				for (scale in doubleArrayOf(1.0, 0.5, 0.25, 0.0)) {
 					val ribbon = buildRibbon(raw.single(), neighbors, width, height, edgeSpacing, scale,
 						samplingScale = if (scale < 0.5) 0.25 else 1.0)
-					if (ribbon != null && isolated(ribbon)) { built = ribbon; break }
+					if (ribbon != null && (!preserveSourceAlpha || coversDomain(ribbon, raw)) && isolated(ribbon)) { built = ribbon; break }
 				}
 			}
 			for (scale in doubleArrayOf(1.0, 0.5, 0.25, 0.125, 0.0625)) {
 				if (built != null) break
 				val band = buildBands(guides, gridCandidates, width, height, edgeSpacing, gridSpacing, scale, neighbors,
 					outerMargin.toDouble(), innerMargin.toDouble(), innerMarginEnabled)
-				if (band != null && isolated(band)) built = band
+				if (band != null && (!preserveSourceAlpha || coversDomain(band, raw)) && isolated(band)) built = band
 			}
 			if (built == null) {
 				// Contour-preserving recovery, never replace a valid silhouette with its bounds.
@@ -190,7 +200,7 @@ internal object AdaptiveMeshGenerator {
 					val recovery = BandedMesh(local, loops, emptyList(), emptyList())
 					// Raster islands can meet at a single corner. Keep their vertex indices separate;
 					// rejecting that harmless contact would trigger the caller's rectangular fallback.
-					if (isolated(recovery, allowBoundaryContact = true)) { built = recovery; break }
+					if ((!preserveSourceAlpha || coversDomain(recovery, raw)) && isolated(recovery, allowBoundaryContact = true)) { built = recovery; break }
 				}
 			}
 			if (built == null) return null
@@ -234,6 +244,23 @@ internal object AdaptiveMeshGenerator {
 		val inner: List<IntArray>,
 		val spines: List<IntArray> = emptyList(),
 	)
+
+    /** A valid triangulation may still cut a curved source silhouette. Reject that fit. */
+    private fun coversDomain(mesh: BandedMesh, source: List<List<Point>>): Boolean {
+        val boundary = mesh.boundaries.map { loop -> loop.map { mesh.mesh.points[it] } }
+        fun contained(p: Point): Boolean = boundary.any { distanceSquaredToLoop(p, it) < 1e-10 } || inDomain(p, boundary)
+        for (loop in source) for (i in loop.indices) {
+            val a = loop[i]; val b = loop[(i + 1) % loop.size]
+            if (!contained(a) || !contained(lerp(a, b, 0.5))) return false
+            if (boundary.any { edge -> edge.indices.any { j ->
+                segmentsProperlyIntersect(a, b, edge[j], edge[(j + 1) % edge.size])
+            } }) return false
+        }
+        // A fitted hole must not consume painted material enclosed by the source domain.
+        return boundary.drop(1).none { hole -> hole.any { p ->
+            inDomain(p, source) && source.all { distanceSquaredToLoop(p, it) > 1e-10 }
+        } }
+    }
 
 	private fun domainsOverlap(
 		a: List<List<Point>>, b: List<List<Point>>, allowBoundaryContact: Boolean = false,
@@ -632,7 +659,7 @@ internal object AdaptiveMeshGenerator {
 			} else {
 				sqrt(8.0 * CURVE_CHORD_ERROR / curvaturePerPixel)
 			}
-			val minimumLocalSpacing = max(3.5, spacing / MAX_CURVE_DENSITY)
+			val minimumLocalSpacing = min(spacing, max(3.5, spacing / MAX_CURVE_DENSITY))
 			val targetSpacing = curvatureSpacing.coerceIn(minimumLocalSpacing, spacing)
 			(spacing / targetSpacing).coerceIn(1.0, MAX_CURVE_DENSITY)
 		}

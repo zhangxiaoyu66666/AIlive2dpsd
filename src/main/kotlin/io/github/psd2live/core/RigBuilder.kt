@@ -308,7 +308,8 @@ object RigBuilder {
 			)
 		}
 
-		val orderedLayers = orderMouthLayers(analysis.layers.sortedBy { it.source.order })
+		val sourceOrder = analysis.layers.sortedBy { it.source.order }
+		val orderedLayers = orderMouthLayers(if (config.meshOnly || config.rigGenerationVersion == 1) sourceOrder else orderEyebrowsAboveFace(sourceOrder))
 		for ((drawIndex, layer) in orderedLayers.withIndex()) {
 			val placement = atlas.placementByLayerId[layer.source.id.raw]
 			if (placement == null || layer.opaquePixels == 0) {
@@ -377,7 +378,8 @@ object RigBuilder {
 				)
 			}
 			val override = config.layerOverrides[layer.source.id.raw]
-			val channelGrids = if (config.meshOnly) ChannelGrids.Empty else buildChannels(layer, override, switchParamKeys)
+			val baseChannels = if (config.meshOnly) ChannelGrids.Empty else buildChannels(layer, override, switchParamKeys)
+            val channelGrids = if (!config.meshOnly && config.rigGenerationVersion >= 2) eyeOpacityChannels(layer, baseChannels) else baseChannels
 			val drawable = Drawable(
 				id = id,
 				name = layer.source.name,
@@ -1159,24 +1161,12 @@ object RigBuilder {
 	): MeshData {
 		val width = max(1, layer.source.raster.width)
 		val height = max(1, layer.source.raster.height)
-		val semanticDensity = when (layer.semantic.tag) {
-			SemanticTag.FACE, SemanticTag.FRONT_HAIR, SemanticTag.BACK_HAIR, SemanticTag.TOPWEAR -> 0.65f
-			SemanticTag.IRIDES, SemanticTag.EYELASH, SemanticTag.EYEWHITE, SemanticTag.EYEBROW,
-			SemanticTag.MOUTH, SemanticTag.MOUTH_OPEN, SemanticTag.MOUTH_CLOSE,
-			SemanticTag.TOOTH_T, SemanticTag.TOOTH_B, SemanticTag.TONGUE -> 0.45f
-			else -> 1f
-		}
-		val override = config.meshOverrides[layer.source.id.raw]
-		val outerMargin = if (config.mouthOutlineEnabled && !config.meshOnly &&
-            layer.semantic.tag in setOf(SemanticTag.MOUTH, SemanticTag.MOUTH_OPEN)) 0f
-            else override?.outerMargin ?: config.meshOuterMargin
-		val innerMargin = override?.innerMargin ?: config.meshInnerMargin
-		// Currently only face meshes use dual-line envelope by default; all other parts use single-line:
-		val innerMarginEnabled = override?.innerMarginEnabled ?: (layer.semantic.tag == SemanticTag.FACE)
-		val effectiveSpacing = if (config.mouthOutlineEnabled && !config.meshOnly &&
-            layer.semantic.tag in setOf(SemanticTag.MOUTH, SemanticTag.MOUTH_OPEN)) 2f
-            else override?.maxEdgeDistance ?: max(12f, config.meshMaxEdgeDistance * semanticDensity)
-		val effectiveInteriorDensity = override?.interiorDensity ?: max(12f, config.meshInteriorDensity * semanticDensity)
+        val settings = config.effectiveMeshSettings(layer.source.id.raw, layer.semantic.tag)
+        val outerMargin = settings.outerMargin
+        val innerMargin = settings.innerMargin
+        val innerMarginEnabled = settings.innerMarginEnabled
+        val effectiveSpacing = settings.maxEdgeDistance
+        val effectiveInteriorDensity = settings.interiorDensity
 
 		// Authored tooth layers may contain several disconnected teeth. Keep their complete texture;
 		// the mouth clipping id supplies the visible boundary.
@@ -1193,6 +1183,7 @@ object RigBuilder {
 			outerMargin = outerMargin,
 			innerMargin = innerMargin,
 			innerMarginEnabled = innerMarginEnabled,
+            preserveSourceAlpha = config.rigGenerationVersion >= 2,
 		)
 		if (adaptive != null) {
 			val positions = FloatArray(adaptive.positions.size)
@@ -1279,7 +1270,7 @@ object RigBuilder {
 		val tag = layer.semantic.tag
 		return when (tag) {
 			SemanticTag.EYEWHITE, SemanticTag.EYELASH ->
-				eyeClosureGrid(layer, data, parentFrame, faceRig, eyeWhiteBounds)
+				eyeClosureGrid(layer, data, parentFrame, faceRig, eyeWhiteBounds, config)
 			// Blink does not key the iris directly. The independent physics output supplies a small,
 			// delayed squash/stretch while eye-white clipping removes it as the lid closes.
 			SemanticTag.IRIDES -> irisJellyGrid(layer, data, parentFrame)
@@ -1297,7 +1288,9 @@ object RigBuilder {
 		frame: Bounds,
 		faceRig: NinePoseFaceRig,
 		eyeWhiteBounds: List<Bounds>,
+        config: PipelineConfig,
 	): KeyformGrid<MeshDeltaForm> {
+		val pairedLids = layer.semantic.tag == SemanticTag.EYELASH && EyeClosureProfile.hasPairedLids(layer, config.alphaThreshold)
 		val parameter = if (layer.semantic.side == Side.LEFT) StandardParameters.EYE_L_OPEN else StandardParameters.EYE_R_OPEN
 		// Column sampling is defined in the source raster's canvas X axis.  Once the head has been
 		// aligned, the alpha-weighted centroid remains correct while that column function no longer is.
@@ -1318,49 +1311,21 @@ object RigBuilder {
 					Side.NONE -> if (canvasX >= faceRig.centerX) values[0] else values[1]
 				}
 				val whiteBounds = eyeWhiteBounds.minByOrNull { abs(it.centerX - canvasX) } ?: layer.bounds
-				val closed = eyeClosurePoint(
+				val closed = EyeClosureProfile.point(
 					canvasX,
 					canvasY,
 					layer.bounds,
 					whiteBounds,
 					layer.semantic.tag,
 					eyelashCenterline?.let { sampleCenterline(it, layer, canvasX) } ?: layer.centroidY,
+                    pairedLids,
+                    legacy = config.rigGenerationVersion == 1,
 				)
 				delta[vertex] = (closed.first - canvasX) / frame.width.coerceAtLeast(1e-4f) * (1f - openness)
 				delta[vertex + 1] = (closed.second - canvasY) / frame.height.coerceAtLeast(1e-4f) * (1f - openness)
 			}
 			MeshDeltaForm(delta)
 		}
-	}
-
-	/**
-	 * Closed eyes share one curve derived from the eye-white bounds.  The common centre line is what
-	 * keeps the shrunken white behind the lash. Every eyelash vertex in the same vertical slice is
-	 * measured from the alpha-weighted source centreline, so the texture follows the target curve
-	 * instead of adding its authored curvature on top of it.
-	 */
-	internal fun eyeClosurePoint(
-		sourceX: Float,
-		sourceY: Float,
-		layerBounds: Bounds,
-		eyeWhiteBounds: Bounds,
-		tag: SemanticTag,
-		sourceAnchorY: Float = layerBounds.centerY,
-	): Pair<Float, Float> {
-		val halfWidth = (eyeWhiteBounds.width * 0.5f).coerceAtLeast(1e-4f)
-		val normalizedX = ((sourceX - eyeWhiteBounds.centerX) / halfWidth).coerceIn(-1f, 1f)
-		val arch = max(0f, 1f - normalizedX * normalizedX)
-		// Keep the trough at 72% of the eye-white height, but raise the endpoints from 48% to 34%.
-		// This deepens the U without increasing its centre travel and reduces movement at both corners.
-		val edgeY = eyeWhiteBounds.top + eyeWhiteBounds.height * 0.34f
-		val curveY = edgeY + max(1.5f, eyeWhiteBounds.height * 0.38f) * arch
-		val layerHeight = layerBounds.height.coerceAtLeast(1f)
-		val verticalScale = when (tag) {
-			SemanticTag.EYELASH -> 0.88f
-			SemanticTag.EYEWHITE -> (1.2f / layerHeight).coerceIn(0.015f, 0.55f)
-			else -> (1.2f / layerHeight).coerceIn(0.015f, 0.55f)
-		}
-		return sourceX to curveY + (sourceY - sourceAnchorY) * verticalScale
 	}
 
 	/** Alpha-weighted centre of every source column, with transparent gaps linearly bridged. */
@@ -1842,7 +1807,7 @@ object RigBuilder {
 	private fun <T> oneDimGrid(parameter: ParameterId, keys: FloatArray, form: (Float) -> T): KeyformGrid<T> =
 		KeyformGrid(listOf(KeyformAxis(parameter, keys)), keys.indices.map { index -> KeyformCell(intArrayOf(index), form(keys[index])) })
 
-	private fun <T> grid(axes: List<KeyformAxis>, form: (FloatArray) -> T): KeyformGrid<T> {
+	internal fun <T> grid(axes: List<KeyformAxis>, form: (FloatArray) -> T): KeyformGrid<T> {
 		val cells = mutableListOf<KeyformCell<T>>()
 		fun visit(axisIndex: Int, coordinate: IntArray, values: FloatArray) {
 			if (axisIndex == axes.size) {

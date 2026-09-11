@@ -232,7 +232,7 @@ fun MeshSettingsDialog(
 					CompactSlider(
 						value = maxEdgeDistance,
 						onValueChange = { maxEdgeDistance = it },
-						valueRange = 6f..128f,
+						valueRange = 1f..128f,
 						modifier = Modifier.weight(1f),
 					)
 					CompactNumberSpinner(
@@ -275,7 +275,7 @@ fun MeshSettingsDialog(
 					CompactSlider(
 						value = interiorDensity,
 						onValueChange = { interiorDensity = it },
-						valueRange = 6f..128f,
+						valueRange = 2f..128f,
 						modifier = Modifier.weight(1f),
 					)
 					CompactNumberSpinner(

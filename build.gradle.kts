@@ -159,6 +159,14 @@ afterEvaluate {
 		doLast {
 			val appDir = file("build/compose/binaries/main/app/PSD2Live/app")
 			if (appDir.exists()) {
+				copy {
+					from("LICENSE", "THIRD_PARTY_NOTICES.md", "docs/eye-rig-reliability.md")
+					into(appDir.parentFile)
+				}
+				copy {
+					from("licenses")
+					into(File(appDir.parentFile, "licenses"))
+				}
 				appDir.listFiles()?.forEach { jarFile ->
 					if (jarFile.name.startsWith("sqlite-jdbc-") || jarFile.name.startsWith("jna-")) {
 						val tempJar = File(jarFile.parentFile, jarFile.name + ".tmp")
@@ -208,4 +216,18 @@ afterEvaluate {
 tasks.test {
 	useJUnitPlatform()
 	systemProperty("psd2live.cubism.smoke", System.getProperty("psd2live.cubism.smoke", "false"))
+}
+
+// Opt-in acceptance with local PSD artwork; ordinary tests use synthetic rasters only.
+tasks.register<JavaExec>("eyeRigVisualCheck") {
+    dependsOn(tasks.testClasses)
+    classpath = sourceSets["test"].runtimeClasspath
+    mainClass.set("io.github.psd2live.core.EyeRigVisualCheck")
+    javaLauncher.set(javaToolchains.launcherFor { languageVersion.set(JavaLanguageVersion.of(21)) })
+    maxHeapSize = "4g"
+    systemProperty("java.awt.headless", "true")
+    doFirst {
+        args(providers.gradleProperty("eyeRigSource").get(),
+            providers.gradleProperty("eyeRigOutput").getOrElse(layout.buildDirectory.dir("eye-rig-qa").get().asFile.absolutePath))
+    }
 }

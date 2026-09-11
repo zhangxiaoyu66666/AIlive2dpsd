@@ -1,6 +1,8 @@
 package io.github.psd2live.ui.state
 
 import io.github.psd2live.core.MeshSettings
+import io.github.psd2live.core.defaultMeshSettings
+import io.github.psd2live.core.effectiveMeshSettings
 import io.github.psd2live.core.SemanticTag
 
 import androidx.compose.runtime.Immutable
@@ -96,6 +98,7 @@ data class PSD2LiveState(
 	val loadedInputFileSignature: String? = null,
 	val outputPath: String = "",
 	val atlasSize: Int = 4096,
+	val rigGenerationVersion: Int = 2,
 	val meshSpacing: Int = 40,
 	val meshOuterMargin: Float = 1.0f,
 	val meshInnerMargin: Float = 10.0f,
@@ -189,6 +192,7 @@ data class PSD2LiveState(
 		val hasAnyMotion = motionIdle || motionBlink || motionNod || motionShake
 		val hasAnyPhysics = physicsFrontHair || physicsBackHair || physicsEyeJelly || rigEdits.physicsEdits.isNotEmpty()
 		return PipelineConfig(
+            rigGenerationVersion = rigGenerationVersion,
 			atlasSize = atlasSize,
 			texturePadding = texturePadding,
 			meshSpacing = meshSpacing,
@@ -236,34 +240,11 @@ data class PSD2LiveState(
 		return drawOrderOverrides[drawableId] ?: defaultOrder
 	}
 
-	fun getDefaultMeshSettings(layerId: String?): MeshSettings {
-		val layer = if (layerId != null) {
-			analysis?.layers?.firstOrNull { it.source.id.raw == layerId }
-		} else null
-		val semanticDensity = when (layer?.semantic?.tag) {
-			SemanticTag.FACE, SemanticTag.FRONT_HAIR, SemanticTag.BACK_HAIR, SemanticTag.TOPWEAR -> 0.65f
-			SemanticTag.IRIDES, SemanticTag.EYELASH, SemanticTag.EYEWHITE, SemanticTag.EYEBROW,
-			SemanticTag.MOUTH, SemanticTag.MOUTH_OPEN, SemanticTag.MOUTH_CLOSE,
-			SemanticTag.TOOTH_T, SemanticTag.TOOTH_B, SemanticTag.TONGUE -> 0.45f
-			else -> 1f
-		}
-		val isFace = layer?.semantic?.tag == SemanticTag.FACE
-		return MeshSettings(
-			outerMargin = meshOuterMargin,
-			innerMarginEnabled = isFace,
-			innerMargin = meshInnerMargin,
-			maxEdgeDistance = kotlin.math.max(12f, meshMaxEdgeDistance * semanticDensity),
-			interiorDensity = kotlin.math.max(12f, meshInteriorDensity * semanticDensity),
-		)
-	}
+    fun getDefaultMeshSettings(layerId: String?): MeshSettings =
+        buildConfig().defaultMeshSettings(analysis?.layers?.firstOrNull { it.source.id.raw == layerId }?.semantic?.tag)
 
-	fun getEffectiveMeshSettings(layerId: String?): MeshSettings {
-		val defaultSettings = getDefaultMeshSettings(layerId)
-		if (layerId != null) {
-			meshOverrides[layerId]?.let { return it }
-		}
-		return defaultSettings
-	}
+    fun getEffectiveMeshSettings(layerId: String?): MeshSettings =
+        buildConfig().effectiveMeshSettings(layerId, analysis?.layers?.firstOrNull { it.source.id.raw == layerId }?.semantic?.tag)
 
 	fun getLayerDrawOrder(layerId: String): Float? {
 		drawOrderOverrides[layerId]?.let { return it }
