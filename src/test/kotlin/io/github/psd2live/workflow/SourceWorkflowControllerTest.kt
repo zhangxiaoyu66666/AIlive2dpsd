@@ -89,6 +89,8 @@ class SourceWorkflowControllerTest {
             vm.sourceWorkflow.execute("decompose", buildJsonObject { put("image", "unused.png") })
             withTimeout(5000) { vm.sourceWorkflow.state.first { !it.busy } }
             assertNotNull(vm.sourceWorkflow.state.value.error)
+            assertEquals(WorkflowOutcome.FAILED, vm.sourceWorkflow.state.value.progress?.outcome)
+            assertEquals("failed", vm.sourceWorkflow.snapshot().getValue("progress").jsonObject.getValue("outcome").jsonPrimitive.content)
             assertNull(vm.sourceWorkflow.record().eventId)
             vm.sourceWorkflow.execute("cancel_wait", buildJsonObject { })
             assertFalse(vm.sourceWorkflow.state.value.busy)

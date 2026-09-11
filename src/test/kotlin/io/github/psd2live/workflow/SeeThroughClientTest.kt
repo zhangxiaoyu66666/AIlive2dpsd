@@ -68,10 +68,16 @@ class SeeThroughClientTest {
                 assertEquals(0, submits, "Detection must never submit a GPU job")
             } finally { vm.close() }
             val image = Files.write(root.resolve("source.png"), byteArrayOf(1, 2, 3))
-            val event = client.submit(endpoint, image, DecomposeOptions())
+            val progress = java.util.concurrent.CopyOnWriteArrayList<WorkflowProgressUpdate>()
+            val event = client.submit(endpoint, image, DecomposeOptions(), progress = { progress.add(it) })
             val messages = mutableListOf<String>()
-            val result = client.receive(endpoint, event, root.resolve("first"), messages::add)
+            val result = client.receive(endpoint, event, root.resolve("first"), { progress.add(it) }, messages::add)
             assertContentEquals(psd, Files.readAllBytes(result))
+            assertTrue(progress.any { it.phase == WorkflowPhase.UPLOADING && it.bytes > 0 && it.bytes == it.totalBytes })
+            assertTrue(progress.map { it.phase }.containsAll(listOf(WorkflowPhase.SUBMITTING, WorkflowPhase.WAITING, WorkflowPhase.GENERATING)))
+            val downloaded = progress.last { it.phase == WorkflowPhase.DOWNLOADING }
+            assertEquals(psd.size.toLong(), downloaded.bytes)
+            assertEquals(psd.size.toLong(), downloaded.totalBytes)
             // Gradio consumes events. Resume from durable result metadata, never require replay.
             client.receive(endpoint, event, root.resolve("first")) { }
             assertTrue(multipartSeen)

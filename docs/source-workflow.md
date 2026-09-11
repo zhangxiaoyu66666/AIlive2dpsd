@@ -40,6 +40,14 @@
 
 ## 验证入口
 
+### 进度反馈
+
+API 页面顶部显示独立进度区：当前阶段、动态进度条和本次操作已用时。上传与下载按真实传输字节计算百分比；拆图接口只报告状态时使用不定进度，不估造完成比例或剩余时间。超过 30 秒未收到拆图状态会提示等待情况，原有 90 秒无更新超时会转成可恢复错误。
+
+进度属于工程标签的控制器；切换页面不会重置计时。停止、失败和完成使用不同状态，计时在结束时冻结；继续接收会开启新的接收计时，使用原 event ID，不再次提交拆图。MCP 的 `source_workflow_get.progress` 同样返回阶段、结果、已用时、字节与可用的传输比例。上传采用现有 Ktor `onUpload`，下载以实际写入字节更新；参考 [Ktor 请求进度文档](https://ktor.io/docs/client-requests.html)（2026-09-12 核对）。
+
+进度版验收：195 项测试通过，失败/错误/跳过均为 0。`workflowProgressPageCheck` 使用受控 HTTP/SSE 服务驱动真实控制器和 Compose 页面，覆盖等待计时、返回标签、停止、原任务恢复及 PSD 预览；仅提交一次，结果含 23 个原始图层。截图在 `build/see-through-progress-qa`，发行目录为 `build/compose/progress-binaries/main/app/PSD2Live`；打包 JVM 的 MemoryUtil/NFD/COM 检查通过。没有再运行 GPU 拆图，也没有创建或操作桌面窗口。
+
 独立 API 页面版验收：192 项测试通过；真实本地服务参数读取、PNG/JPEG/WebP 原图解码、参数刷新保留用户修改、确认并进入编辑、工程重开后恢复 PSD 预览均已覆盖。使用实际 Compose 页面生成空状态、原图/结果对照及点击图层后的图像，保存于 `build/see-through-page-qa`。新包输出到 `build/compose/see-through-page-binaries/main/app/PSD2Live`，打包 JVM 的 MemoryUtil/NFD/COM 检查通过。此轮没有重新运行 GPU 拆图，也没有操作用户桌面窗口。
 
 普通 `check` 包含合成 PSD 的确认/导入、同路径不同内容、工程归档往返、快照校验、生成文件哈希、真实 HTTP multipart/SSE 协议与文件选择器回归。

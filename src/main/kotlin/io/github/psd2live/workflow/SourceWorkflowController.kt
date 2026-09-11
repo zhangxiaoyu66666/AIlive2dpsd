@@ -30,6 +30,7 @@ data class SourceWorkflowUi(
     val draft: SourceWorkflowRecord? = null,
     val importedTabId: String? = null,
     val sourceChanged: Boolean? = null,
+    val progress: WorkflowProgress? = null,
 )
 
 /** One coordinator per project tab. All UI/MCP actions use this same state machine. */
@@ -106,6 +107,7 @@ class SourceWorkflowController(private val viewModel: PSD2LiveViewModel, private
         put("busy", state.value.busy || projectBusy); put("workflowBusy", state.value.busy); put("projectBusy", projectBusy)
         put("connected", state.value.connected); put("status", state.value.status)
         put("detecting", state.value.detecting); put("serviceError", state.value.serviceError)
+        put("progress", state.value.progress?.toJson() ?: JsonNull)
         state.value.input?.let { put("inputPath", it.path); put("inputSha256", it.sha256) }
         put("projectStatus", project.statusText)
         put("error", state.value.error ?: project.errorMessage ?: project.projectSaveError)
@@ -125,11 +127,11 @@ class SourceWorkflowController(private val viewModel: PSD2LiveViewModel, private
         fun text(key: String): String = args[key]?.jsonPrimitive?.content ?: error("Missing $key")
         when (action) {
             "state" -> Unit
-            "select_image" -> start {
+            "select_image" -> start(action) {
                 val input = withContext(Dispatchers.IO) { WorkflowImages.read(Path.of(text("path"))) }
                 mutable.update { it.copy(input = input, status = tr("flow.imageReady")) }
             }
-            "connect" -> start {
+            "connect" -> start(action) {
                 mutable.update { it.copy(connected = false) }
                 clientUsed = true
                 val service = client.describe(text("endpoint"))
@@ -137,7 +139,7 @@ class SourceWorkflowController(private val viewModel: PSD2LiveViewModel, private
                 val changed = endpoint != record().endpoint
                 mutable.update { it.copy(connected = true, serviceError = null, options = if (it.optionsEdited) it.options else service.defaults, draft = if (changed) SourceWorkflowRecord(endpoint) else record(), candidate = if (changed) null else it.candidate, importCandidate = if (changed) null else it.importCandidate, status = tr("flow.connected")) }
             }
-            "decompose" -> start {
+            "decompose" -> start(action) {
                 check(state.value.connected) { tr("flow.connectFirst") }
                 check(record().eventId == null || state.value.candidate != null) { tr("flow.resumeFirst") }
                 val options = DecomposeOptions(args["resolution"]?.jsonPrimitive?.int ?: 1024, args["seed"]?.jsonPrimitive?.int ?: 42,
@@ -152,18 +154,18 @@ class SourceWorkflowController(private val viewModel: PSD2LiveViewModel, private
                     put("imagePath", imagePath.toString()); put("imageSha256", imageHash); put("resolution", options.resolution)
                     put("seed", options.seed); put("split", options.split); put("offload", options.offload)
                 }
-                val eventId = client.submit(record().endpoint, imagePath, options, imageHash)
+                val eventId = client.submit(record().endpoint, imagePath, options, imageHash, ::updateProgress)
                 mutable.update { it.copy(draft = record().copy(eventId = eventId, decomposition = decomposition)) }
                 // Retain event identity before waiting. Reconnection must never submit another GPU job.
                 withContext(Dispatchers.IO) { Files.createDirectories(directory); SourceVersions.writeJsonAtomically(directory.resolve("job.json"), record().toJson()) }
                 receive()
             }
-            "resume" -> start { clientUsed = true; receive() }
-            "stage_result" -> start {
+            "resume" -> start(action) { clientUsed = true; receive() }
+            "stage_result" -> start(action) {
                 val candidate = inspect(Path.of(text("path")))
                 mutable.update { it.copy(candidate = candidate, importCandidate = null, importedTabId = null, draft = record().copy(confirmed = null, eventId = null, decomposition = null), sourceChanged = null, status = tr("flow.resultReady")) }
             }
-            "confirm" -> start {
+            "confirm" -> start(action) {
                 val candidate = checkNotNull(state.value.candidate) { tr("flow.chooseResult") }
                 require(text("sha256") == candidate.version.sha256) { tr("flow.staleCandidate") }
                 withContext(Dispatchers.IO) { SourceVersions.verify(candidate.version) }
@@ -171,7 +173,7 @@ class SourceWorkflowController(private val viewModel: PSD2LiveViewModel, private
                     mutable.update { it.copy(draft = record().copy(confirmed = candidate.version), importCandidate = candidate, importedTabId = null, status = tr("flow.confirmed")) }
                 }
             }
-            "save_psd" -> start {
+            "save_psd" -> start(action) {
                 val candidate = checkNotNull(state.value.importCandidate ?: state.value.candidate) { tr("flow.chooseResult") }
                 require(text("sha256") == candidate.version.sha256) { tr("flow.staleCandidate") }
                 val target = Path.of(text("path")).toAbsolutePath().normalize()
@@ -191,12 +193,12 @@ class SourceWorkflowController(private val viewModel: PSD2LiveViewModel, private
                     mutable.update { it.copy(importCandidate = staged, importedTabId = null, status = tr("flow.editableSaved")) }
                 } else mutable.update { it.copy(status = tr("flow.editableSaved")) }
             }
-            "stage_import" -> start {
+            "stage_import" -> start(action) {
                 check(record().confirmed != null) { tr("flow.confirmFirst") }
                 val candidate = inspect(Path.of(text("path")))
                 mutable.update { it.copy(importCandidate = candidate, importedTabId = null) }
             }
-            "import" -> start {
+            "import" -> start(action) {
                 check(!viewModel.state.value.isGenerating && !viewModel.state.value.isAnalyzing && !viewModel.state.value.projectSaving) { tr("tabs.busy") }
                 val confirmed = checkNotNull(record().confirmed) { tr("flow.confirmFirst") }
                 val candidate = checkNotNull(state.value.importCandidate) { tr("flow.chooseImport") }
@@ -213,12 +215,13 @@ class SourceWorkflowController(private val viewModel: PSD2LiveViewModel, private
                 check(viewModel.sourceWorkflowHistoryHead() == text("expected_history_head_node_id")) { "History HEAD changed; read state again" }
                 viewModel.generateRig(text("output"))
             }
-            "check_source" -> start {
+            "check_source" -> start(action) {
                 val imported = checkNotNull(viewModel.state.value.sourceWorkflow?.imported) { tr("flow.importFirst") }
                 val changed = withContext(Dispatchers.IO) { SourceVersions.changed(imported) }
                 mutable.update { it.copy(sourceChanged = changed, status = tr(if (changed) "flow.sourceChanged" else "flow.sourceCurrent")) }
             }
-            "cancel_wait" -> { job?.cancelAndJoin(); mutable.update { it.copy(busy = false, status = tr("flow.waitStopped")) } }
+            "cancel_wait" -> { job?.cancelAndJoin(); mutable.update { it.copy(busy = false, status = tr("flow.waitStopped"),
+                progress = it.progress?.let { progress -> if (progress.outcome == WorkflowOutcome.RUNNING) progress.finish(WorkflowOutcome.STOPPED) else progress }) } }
             else -> error("Unknown source workflow action: $action")
         }
         val result = snapshot()
@@ -245,19 +248,22 @@ class SourceWorkflowController(private val viewModel: PSD2LiveViewModel, private
             catch (failure: Exception) { mutable.update { it.copy(error = failure.message, expanded = true) } } }
     }
 
-    private fun start(block: suspend () -> Unit) {
+    private fun start(operation: String = "restore", block: suspend () -> Unit) {
         check(!mutable.value.busy) { tr("tabs.busy") }
-        mutable.update { it.copy(busy = true, expanded = true, error = null) }
+        mutable.update { it.copy(busy = true, expanded = true, error = null, status = "", progress = WorkflowProgress(operation)) }
         job = scope.launch {
-            try { block() }
-            catch (cancelled: CancellationException) { throw cancelled }
-            catch (failure: Exception) { mutable.update { it.copy(error = failure.message ?: tr("flow.failed")) } }
+            try { block(); mutable.update { it.copy(progress = it.progress?.finish(WorkflowOutcome.COMPLETED)) } }
+            catch (cancelled: CancellationException) {
+                mutable.update { it.copy(progress = it.progress?.finish(WorkflowOutcome.STOPPED)) }
+                throw cancelled
+            }
+            catch (failure: Exception) { mutable.update { it.copy(error = failure.message ?: tr("flow.failed"), progress = it.progress?.finish(WorkflowOutcome.FAILED)) } }
             finally { mutable.update { it.copy(busy = false) } }
         }
     }
 
     private suspend fun receive() {
-        val path = client.receive(record().endpoint, checkNotNull(record().eventId) { tr("flow.noEvent") }, directory) { message ->
+        val path = client.receive(record().endpoint, checkNotNull(record().eventId) { tr("flow.noEvent") }, directory, ::updateProgress) { message ->
             mutable.update { it.copy(status = message) }
         }
         val candidate = inspect(path)
@@ -265,6 +271,7 @@ class SourceWorkflowController(private val viewModel: PSD2LiveViewModel, private
     }
 
     private suspend fun inspect(path: Path): SourceCandidate = withContext(Dispatchers.IO) {
+        updateProgress(WorkflowProgressUpdate(WorkflowPhase.READING))
         val version = SourceVersions.capture(path, directory)
         try { readCandidate(version) } catch (failure: Throwable) { Files.deleteIfExists(Path.of(version.snapshot)); throw failure }
     }
@@ -276,6 +283,10 @@ class SourceWorkflowController(private val viewModel: PSD2LiveViewModel, private
         val layers = analysis.source.layers.map { layer -> WorkflowLayer(layer.name,
             WorkflowImages.thumbnail(PreviewRenderer.rasterImage(layer.raster.width, layer.raster.height, layer.raster.rgba), 320)) }
         return SourceCandidate(version, analysis.source.widthPx, analysis.source.heightPx, analysis.source.layers.map { it.name }, preview, layers)
+    }
+
+    private fun updateProgress(update: WorkflowProgressUpdate) {
+        mutable.update { it.copy(progress = it.progress?.advance(update)) }
     }
 
     override fun close() { scope.cancel(); if (clientUsed) client.close() }

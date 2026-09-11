@@ -3,6 +3,7 @@ package io.github.psd2live.workflow
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
 import io.ktor.client.plugins.HttpTimeout
+import io.ktor.client.plugins.onUpload
 import io.ktor.client.plugins.sse.*
 import io.ktor.client.request.*
 import io.ktor.client.request.forms.*
@@ -47,7 +48,8 @@ class SeeThroughClient(private val http: HttpClient = HttpClient(CIO) {
             default("seed")?.intOrNull ?: 42, default("split")?.booleanOrNull ?: true, default("offload")?.booleanOrNull ?: true))
     }
 
-    suspend fun submit(endpoint: String, image: Path, options: DecomposeOptions, expectedImageHash: String? = null): String = withContext(Dispatchers.IO) {
+    suspend fun submit(endpoint: String, image: Path, options: DecomposeOptions, expectedImageHash: String? = null,
+        progress: (WorkflowProgressUpdate) -> Unit = {}): String = withContext(Dispatchers.IO) {
         val base = endpoint(endpoint)
         require(options.resolution in 768..1280 && options.resolution % 64 == 0 && options.seed in 0..9999) { "Invalid decomposition options" }
         require(Files.isRegularFile(image) && Files.size(image) in 1..(32L * 1024 * 1024)) { "Select an image up to 32 MiB" }
@@ -56,7 +58,9 @@ class SeeThroughClient(private val http: HttpClient = HttpClient(CIO) {
         val imageBytes = Files.readAllBytes(image)
         if (expectedImageHash != null) check(java.security.MessageDigest.getInstance("SHA-256").digest(imageBytes)
             .joinToString("") { "%02x".format(it.toInt() and 255) } == expectedImageHash) { "Image changed before upload; select it again" }
+        progress(WorkflowProgressUpdate(WorkflowPhase.UPLOADING))
         val uploaded = Json.parseToJsonElement(http.post("$base/gradio_api/upload") {
+            onUpload { sent, total -> progress(WorkflowProgressUpdate(WorkflowPhase.UPLOADING, sent, total)) }
             setBody(MultiPartFormDataContent(formData {
                 append("files", imageBytes, Headers.build {
                     append(HttpHeaders.ContentDisposition, "filename=\"source.$suffix\"")
@@ -68,20 +72,22 @@ class SeeThroughClient(private val http: HttpClient = HttpClient(CIO) {
             add(buildJsonObject { put("path", uploaded); putJsonObject("meta") { put("_type", "gradio.FileData") } })
             add(JsonPrimitive(options.resolution)); add(JsonPrimitive(options.seed)); add(JsonPrimitive(options.split)); add(JsonPrimitive(options.offload))
         } }
+        progress(WorkflowProgressUpdate(WorkflowPhase.SUBMITTING))
         val response = http.post("$base/gradio_api/call/decompose") { contentType(ContentType.Application.Json); setBody(payload.toString()) }
         Json.parseToJsonElement(response.bodyAsText()).jsonObject.getValue("event_id").jsonPrimitive.content.also(::validateEvent)
     }
 
     @OptIn(kotlinx.coroutines.FlowPreview::class)
-    suspend fun receive(endpoint: String, eventId: String, destination: Path, status: (String) -> Unit): Path {
+    suspend fun receive(endpoint: String, eventId: String, destination: Path, progress: (WorkflowProgressUpdate) -> Unit = {}, status: (String) -> Unit): Path {
         val base = endpoint(endpoint); validateEvent(eventId)
         val metadata = destination.resolve("result-$eventId.json")
         if (Files.isRegularFile(metadata)) {
             val saved = withContext(Dispatchers.IO) { Json.parseToJsonElement(Files.readString(metadata)).jsonObject }
             require(saved["endpoint"]?.jsonPrimitive?.content == base) { "Result belongs to another service" }
-            return download(base, eventId, saved.getValue("file").jsonObject, destination)
+            return download(base, eventId, saved.getValue("file").jsonObject, destination, progress)
         }
         var completed: JsonObject? = null
+        progress(WorkflowProgressUpdate(WorkflowPhase.WAITING))
         try { http.sse("$base/gradio_api/call/decompose/$eventId") {
             incoming.filter { it.event != "heartbeat" }.timeout(90.seconds).takeWhile { event ->
                 when (event.event) {
@@ -90,6 +96,7 @@ class SeeThroughClient(private val http: HttpClient = HttpClient(CIO) {
                         error(event.data?.take(1000) ?: "See-Through failed")
                     }
                     "generating", "complete" -> {
+                        progress(WorkflowProgressUpdate(WorkflowPhase.GENERATING))
                         val data = Json.parseToJsonElement(event.data ?: "[]").jsonArray
                         (data.getOrNull(2) as? JsonPrimitive)?.contentOrNull?.let(status)
                         // Gradio generators end with null/skip outputs. Keep the last actual file.
@@ -112,10 +119,10 @@ class SeeThroughClient(private val http: HttpClient = HttpClient(CIO) {
             throw java.io.IOException("No result updates for 90 seconds. Resume the known event or select its generated PSD; do not submit again.", timeout)
         }
         val file = completed ?: error("Connection ended before completion. Resume this event; do not submit again.")
-        return download(base, eventId, file, destination)
+        return download(base, eventId, file, destination, progress)
     }
 
-    internal suspend fun download(endpoint: String, eventId: String, file: JsonObject, destination: Path): Path {
+    internal suspend fun download(endpoint: String, eventId: String, file: JsonObject, destination: Path, progress: (WorkflowProgressUpdate) -> Unit = {}): Path {
         val base = endpoint(endpoint); validateEvent(eventId)
         val url = file["url"]?.jsonPrimitive?.content ?: error("Result has no download URL")
         val download = URI(base).resolve(url)
@@ -127,7 +134,9 @@ class SeeThroughClient(private val http: HttpClient = HttpClient(CIO) {
             val target = destination.resolve("see-through-$eventId.psd")
             val partial = Files.createTempFile(destination, ".download-", ".psd")
             try {
+                progress(WorkflowProgressUpdate(WorkflowPhase.DOWNLOADING))
                 http.prepareGet(download.toString()).execute { response ->
+                    val expectedBytes = response.contentLength()
                     val input = response.bodyAsChannel(); val buffer = ByteArray(128 * 1024)
                     var total = 0L
                     Files.newOutputStream(partial).use { output ->
@@ -137,6 +146,7 @@ class SeeThroughClient(private val http: HttpClient = HttpClient(CIO) {
                             total += count
                             require(total <= SourceVersions.MAX_PSD_BYTES) { "PSD exceeds import budget" }
                             output.write(buffer, 0, count)
+                            progress(WorkflowProgressUpdate(WorkflowPhase.DOWNLOADING, total, expectedBytes))
                         }
                     }
                 }

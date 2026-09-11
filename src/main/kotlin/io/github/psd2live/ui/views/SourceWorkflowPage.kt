@@ -63,6 +63,9 @@ internal fun SourceWorkflowPage(vm: PSD2LiveViewModel, window: Window?, autoDete
             CompactButton(tr("flow.connect"), { controller.action("connect", "endpoint" to endpoint) }, enabled = enabled && !ui.detecting)
             Text(ui.serviceError.orEmpty(), color = colors.textMuted, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
+        ui.progress?.takeIf { ui.busy || it.operation in setOf("decompose", "resume") || it.outcome == io.github.psd2live.workflow.WorkflowOutcome.FAILED }?.let {
+            WorkflowProgressPanel(it, ui.status, ui.error) { controller.action("cancel_wait") }
+        }
         Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Column(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -128,12 +131,15 @@ internal fun SourceWorkflowPage(vm: PSD2LiveViewModel, window: Window?, autoDete
                     color = if (record.confirmed == null) colors.textMuted else colors.success, fontSize = 11.sp)
             }
         }
-        if (ui.busy || project.isAnalyzing) LinearProgressIndicator(Modifier.fillMaxWidth().height(3.dp), color = colors.accent)
+        if (project.isAnalyzing || project.isGenerating) {
+            Text(project.statusText, color = colors.textPrimary, fontSize = 12.sp)
+            if (project.isIndeterminateProgress) LinearProgressIndicator(Modifier.fillMaxWidth().height(8.dp), color = colors.accent)
+            else LinearProgressIndicator(project.progress, Modifier.fillMaxWidth().height(8.dp), color = colors.accent)
+        }
         Row(Modifier.fillMaxWidth().heightIn(min = 30.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(ui.error ?: ui.status.ifBlank { tr("flow.pageHint") }, color = if (ui.error != null) colors.error else colors.textMuted,
                 fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-            if (ui.busy) CompactButton(tr("flow.stopWait"), { controller.action("cancel_wait") })
-            else if (record.eventId != null && candidate == null) CompactButton(tr("flow.resume"), { controller.action("resume") }, enabled = enabled)
+            if (!ui.busy && record.eventId != null && candidate == null) CompactButton(tr("flow.resume"), { controller.action("resume") }, enabled = enabled)
             if (project.sourceWorkflow?.imported != null) {
                 CompactButton(tr("flow.checkSource"), { controller.action("check_source") }, enabled = enabled)
                 CompactButton(tr("flow.generate"), { vm.generateRig() }, enabled = enabled && project.analysis != null)
