@@ -7,6 +7,7 @@ import io.github.psd2live.core.RigPreviewModel
 import io.github.psd2live.core.SemanticTag
 import io.github.psd2live.core.Side
 import io.github.psd2live.i18n.I18n
+import io.github.psd2live.ui.utils.NativeFilePicker
 import io.github.psd2live.i18n.tr
 import java.awt.BorderLayout
 import java.awt.BasicStroke
@@ -43,7 +44,6 @@ import javax.swing.JButton
 import javax.swing.JCheckBox
 import javax.swing.DefaultCellEditor
 import javax.swing.JComboBox
-import javax.swing.JFileChooser
 import javax.swing.JFrame
 import javax.swing.Icon
 import javax.swing.JLabel
@@ -67,7 +67,6 @@ import javax.swing.KeyStroke
 import javax.swing.SpinnerNumberModel
 import javax.swing.SwingWorker
 import javax.swing.Timer
-import javax.swing.filechooser.FileNameExtensionFilter
 import javax.swing.table.DefaultTableCellRenderer
 
 class PSD2LiveFrame : JFrame() {
@@ -444,12 +443,8 @@ class PSD2LiveFrame : JFrame() {
 	}
 
 	private fun chooseInput() {
-		val chooser = JFileChooser().apply {
-			dialogTitle = tr("dialog.choosePsd")
-			fileFilter = FileNameExtensionFilter(tr("dialog.psdFilter"), "psd")
-		}
-		if (chooser.showOpenDialog(this) == JFileChooser.APPROVE_OPTION) setInput(chooser.selectedFile.toPath())
-	}
+        NativeFilePicker.choosePsdFile(this, inputField.text)?.let { setInput(Path.of(it)) }
+    }
 
 	private fun setInput(path: Path) {
 		val normalized = path.toAbsolutePath().normalize()
@@ -459,13 +454,8 @@ class PSD2LiveFrame : JFrame() {
 	}
 
 	private fun chooseOutput() {
-		val chooser = JFileChooser().apply {
-			dialogTitle = tr("dialog.chooseOutput")
-			fileSelectionMode = JFileChooser.DIRECTORIES_ONLY
-			outputPathOrNull()?.toFile()?.takeIf(File::exists)?.let { currentDirectory = it }
-		}
-		if (chooser.showOpenDialog(this) == JFileChooser.APPROVE_OPTION) outputField.text = chooser.selectedFile.absolutePath
-	}
+        NativeFilePicker.chooseDirectory(this, outputField.text)?.let { outputField.text = it }
+    }
 
 	private fun analyze() {
 		val input = inputPathOrShowError() ?: return

@@ -60,8 +60,10 @@ dependencies {
 	implementation(platform("org.lwjgl:lwjgl-bom:3.4.2"))
 	implementation("org.lwjgl:lwjgl")
 	implementation("org.lwjgl:lwjgl-opengl")
+	implementation("org.lwjgl:lwjgl-nfd")
 	runtimeOnly("org.lwjgl:lwjgl::$lwjglNatives")
 	runtimeOnly("org.lwjgl:lwjgl-opengl::$lwjglNatives")
+	runtimeOnly("org.lwjgl:lwjgl-nfd::$lwjglNatives")
 	implementation("io.modelcontextprotocol:kotlin-sdk-server:0.15.0")
 	implementation("io.ktor:ktor-server-cio")
 	implementation("io.ktor:ktor-server-auth")
@@ -160,7 +162,7 @@ afterEvaluate {
 			val appDir = file("build/compose/binaries/main/app/PSD2Live/app")
 			if (appDir.exists()) {
 				copy {
-					from("LICENSE", "THIRD_PARTY_NOTICES.md", "docs/eye-rig-reliability.md")
+					from("LICENSE", "THIRD_PARTY_NOTICES.md", "docs/eye-rig-reliability.md", "docs/native-file-picker.md")
 					into(appDir.parentFile)
 				}
 				copy {
