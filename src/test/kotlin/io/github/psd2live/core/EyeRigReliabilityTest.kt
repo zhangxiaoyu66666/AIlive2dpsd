@@ -87,7 +87,7 @@ class EyeRigReliabilityTest {
         val legacy = WorkspaceStateCodec.decode(buildJsonObject { put("meshMaxEdgeDistance", 6f) })
         assertEquals(1, legacy.rigGenerationVersion)
         assertEquals(12f, legacy.buildConfig().defaultMeshSettings(SemanticTag.IRIDES).maxEdgeDistance)
-        val state = PSD2LiveState(meshMaxEdgeDistance = 2f)
+        val state = PSD2LiveState(meshMaxEdgeDistance = 2f, rigGenerationVersion = 2)
         val saved = WorkspaceStateCodec.settings(state)
         val restored = WorkspaceStateCodec.decode(saved)
         assertEquals(2, restored.rigGenerationVersion)

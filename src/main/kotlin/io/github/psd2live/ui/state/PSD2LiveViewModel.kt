@@ -273,59 +273,46 @@ class PSD2LiveViewModel : AutoCloseable {
 	}
 
 	fun setMeshSpacing(spacing: Int) {
-		_state.update { it.copy(meshSpacing = spacing.coerceIn(16, 128), meshMaxEdgeDistance = spacing.toFloat(), meshInteriorDensity = spacing.toFloat()) }
-		schedulePreviewRebuild()
-	    editorChanged()
+		updateMeshSettings { it.copy(meshSpacing = spacing.coerceIn(16, 128), meshMaxEdgeDistance = spacing.toFloat(), meshInteriorDensity = spacing.toFloat()) }
 	}
 
 	fun setMeshOuterMargin(margin: Float) {
-		_state.update { it.copy(meshOuterMargin = margin.coerceIn(0f, 32f)) }
-		schedulePreviewRebuild()
-	    editorChanged()
+		updateMeshSettings { it.copy(meshOuterMargin = margin.coerceIn(0f, 32f)) }
 	}
 
 	fun setMeshInnerMargin(margin: Float) {
-		_state.update { it.copy(meshInnerMargin = margin.coerceIn(0.5f, 32f)) }
-		schedulePreviewRebuild()
-	    editorChanged()
+		updateMeshSettings { it.copy(meshInnerMargin = margin.coerceIn(0.5f, 32f)) }
 	}
 
 	fun setMeshMaxEdgeDistance(distance: Float) {
-		_state.update { it.copy(meshMaxEdgeDistance = distance.coerceIn(6f, 128f), meshSpacing = distance.toInt().coerceIn(16, 128)) }
-		schedulePreviewRebuild()
-	    editorChanged()
+		updateMeshSettings { it.copy(meshMaxEdgeDistance = distance.coerceIn(6f, 128f), meshSpacing = distance.toInt().coerceIn(16, 128)) }
 	}
 
 	fun setMeshInteriorDensity(density: Float) {
-		_state.update { it.copy(meshInteriorDensity = density.coerceIn(6f, 128f)) }
-		schedulePreviewRebuild()
-	    editorChanged()
+		updateMeshSettings { it.copy(meshInteriorDensity = density.coerceIn(6f, 128f)) }
 	}
 
 	fun setPartMeshSettings(layerId: String, settings: MeshSettings) {
-        if (!canRemeshLayer(layerId)) return
-		_state.update { it.copy(meshOverrides = it.meshOverrides + (layerId to settings)) }
-		schedulePreviewRebuild()
-	    editorChanged()
+		updateMeshSettings { it.copy(meshOverrides = it.meshOverrides + (layerId to settings)) }
 	}
 
 	fun resetPartMeshSettings(layerId: String) {
-        if (!canRemeshLayer(layerId)) return
-		_state.update { it.copy(meshOverrides = it.meshOverrides - layerId) }
-		schedulePreviewRebuild()
-	    editorChanged()
+		updateMeshSettings { it.copy(meshOverrides = it.meshOverrides - layerId) }
 	}
 
-    private fun canRemeshLayer(layerId: String): Boolean {
+    private fun updateMeshSettings(change: (PSD2LiveState) -> PSD2LiveState) {
         val current = _state.value
-        val rig = current.previewModel?.rig ?: return false
-        return try {
-            io.github.psd2live.core.requireLayerRemeshable(current.rigEdits, rig.puppet, rig.layerIdByDrawableId, listOf(layerId))
-            true
+        val next = change(current)
+        if (next == current) return
+        try {
+            requireMeshSettingsChangeSafe(current, next)
         } catch (failure: IllegalArgumentException) {
             _state.update { it.copy(errorMessage = failure.message) }
-            false
+            return
         }
+        _state.value = next
+        schedulePreviewRebuild()
+        editorChanged()
     }
 
 	fun setHeadStrength(strength: Float) {
@@ -347,32 +334,30 @@ class PSD2LiveViewModel : AutoCloseable {
 	}
 
 	fun setAlphaThreshold(threshold: Int) {
-		_state.update { it.copy(alphaThreshold = threshold.coerceIn(0, 255)) }
-		schedulePreviewRebuild()
-	    editorChanged()
+		updateMeshSettings { it.copy(alphaThreshold = threshold.coerceIn(0, 255)) }
 	}
 
     fun setMouthOutlineEnabled(enabled: Boolean) {
-        _state.update { it.copy(mouthOutlineEnabled = enabled) }
-        schedulePreviewRebuild()
-        editorChanged()
+        updateMeshSettings { it.copy(mouthOutlineEnabled = enabled) }
     }
     fun setMouthShape(shape: String) {
         require(shape in listOf("flat", "smile", "w"))
-        _state.update { it.copy(mouthShape = shape, mouthCurve = io.github.psd2live.core.MouthCurve.preset(shape)) }
-        schedulePreviewRebuild()
-        editorChanged()
+        updateMeshSettings { it.copy(mouthShape = shape, mouthCurve = io.github.psd2live.core.MouthCurve.preset(shape)) }
     }
     fun setMouthSettings(shape: String, curve: io.github.psd2live.core.MouthCurve, color: Int?, thickness: Float) {
         require(shape in io.github.psd2live.core.MouthCurve.presets + "custom")
         require(color == null || color in 0..0xFFFFFF)
         require(thickness.isFinite() && thickness in 0.5f..8f)
-        _state.update { it.copy(mouthShape = shape, mouthCurve = curve, mouthColor = color, mouthThickness = thickness) }
-        schedulePreviewRebuild()
-        editorChanged()
+        updateMeshSettings { it.copy(mouthShape = shape, mouthCurve = curve, mouthColor = color, mouthThickness = thickness) }
     }
 
 	fun setMeshOnly(enabled: Boolean) {
+        try {
+            requireMeshSettingsChangeSafe(_state.value, _state.value.copy(meshOnly = enabled, generateDeformers = !enabled))
+        } catch (failure: IllegalArgumentException) {
+            _state.update { it.copy(errorMessage = failure.message) }
+            return
+        }
 		_state.update { current ->
 			val updated = current.copy(meshOnly = enabled, generateDeformers = !enabled)
 			if (enabled) {
@@ -635,7 +620,7 @@ class PSD2LiveViewModel : AutoCloseable {
 	}
 
 	fun resetSettingsToDefault() {
-		_state.update {
+		updateMeshSettings {
 			it.copy(
 				atlasSize = 4096,
 				textureSubExpanded = false,
@@ -674,8 +659,6 @@ class PSD2LiveViewModel : AutoCloseable {
 				exportJson = true,
 			)
 		}
-		schedulePreviewRebuild()
-	    editorChanged()
 	}
 
 	fun setLanguage(language: AppLanguage) {
@@ -1295,7 +1278,7 @@ class PSD2LiveViewModel : AutoCloseable {
 				)
 			}
 			try {
-				val config = _state.value.copy(rigGenerationVersion = 2, layerVisibility = emptyMap(), layerOverrides = emptyMap(), deletedLayerIds = emptySet(), parentOverrides = emptyMap(), rigEdits = RigEditOverlay.Empty).buildConfig()
+				val config = _state.value.copy(rigGenerationVersion = 3, layerVisibility = emptyMap(), layerOverrides = emptyMap(), deletedLayerIds = emptySet(), parentOverrides = emptyMap(), rigEdits = RigEditOverlay.Empty).buildConfig()
 				val preview = withContext(Dispatchers.Default) {
 					pipeline.buildPreview(input, config)
 				}
@@ -1322,7 +1305,7 @@ class PSD2LiveViewModel : AutoCloseable {
 					current.withLogs(logLinesList, level = LogLevel.INFO, tag = "Analysis").copy(
 						isIndeterminateProgress = false,
 						projectId = java.util.UUID.randomUUID().toString(),
-                        rigGenerationVersion = 2,
+                        rigGenerationVersion = 3,
                         projectSourceName = input.fileName.toString(),
                         projectFile = null, projectDirty = true, showProjectLocationDialog = false, isAnalyzing = true,
                         layerVisibility = emptyMap(), layerOverrides = emptyMap(), deletedLayerIds = emptySet(), parentOverrides = emptyMap(), rigEdits = RigEditOverlay.Empty,

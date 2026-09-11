@@ -98,7 +98,7 @@ data class PSD2LiveState(
 	val loadedInputFileSignature: String? = null,
 	val outputPath: String = "",
 	val atlasSize: Int = 4096,
-	val rigGenerationVersion: Int = 2,
+	val rigGenerationVersion: Int = 3,
 	val meshSpacing: Int = 40,
 	val meshOuterMargin: Float = 1.0f,
 	val meshInnerMargin: Float = 10.0f,

@@ -174,7 +174,7 @@ internal object WorkspaceStateCodec {
         canvasPanX = value["canvasPanX"]?.jsonPrimitive?.float ?: base.canvasPanX,
         canvasPanY = value["canvasPanY"]?.jsonPrimitive?.float ?: base.canvasPanY,
         outputPath = value["outputPath"]?.jsonPrimitive?.content ?: base.outputPath,
-        rigGenerationVersion = (value["rigGenerationVersion"]?.jsonPrimitive?.int ?: 1).also { require(it in 1..2) { "Unsupported rig generation version: $it" } },
+        rigGenerationVersion = (value["rigGenerationVersion"]?.jsonPrimitive?.int ?: 1).also { require(it in 1..3) { "Unsupported rig generation version: $it" } },
         atlasSize = value["atlasSize"]?.jsonPrimitive?.int ?: base.atlasSize,
         meshSpacing = value["meshSpacing"]?.jsonPrimitive?.int ?: base.meshSpacing,
         meshOuterMargin = value["meshOuterMargin"]?.jsonPrimitive?.float ?: base.meshOuterMargin,

@@ -22,9 +22,10 @@ object EyeRigVisualCheck {
         }
         val pipeline = PSD2LivePipeline()
         val report = buildJsonObject {
-            for (version in 1..2) {
+            for (version in 1..3) {
                 lateinit var preview: RigPreviewModel
                 val elapsed = measureTimeMillis { preview = pipeline.buildPreview(source, PipelineConfig(rigGenerationVersion = version)) }
+                if (version >= 2) writeFaceTurnQa(preview, output, version)
                 val eyeTags = setOf(SemanticTag.IRIDES, SemanticTag.EYEWHITE, SemanticTag.EYELASH, SemanticTag.EYEBROW)
                 val eyes = preview.analysis.layers.filter { it.semantic.tag in eyeTags }
                 require(eyes.isNotEmpty()) { "No eye layers found" }
