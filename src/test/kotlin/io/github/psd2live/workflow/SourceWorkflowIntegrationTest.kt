@@ -60,6 +60,10 @@ class SourceWorkflowIntegrationTest {
             assertEquals(receipt, lineage.generation)
             SourceVersions.verify(lineage.confirmed); SourceVersions.verify(lineage.imported)
             assertNotNull(reopened.state.value.analysis)
+            reopened.sourceWorkflow.restorePage()
+            withTimeout(10000) { reopened.sourceWorkflow.state.first { !it.busy } }
+            assertEquals(imported.sha256, reopened.sourceWorkflow.state.value.importCandidate!!.version.sha256)
+            assertEquals(1, reopened.sourceWorkflow.state.value.importCandidate!!.layers.size)
         } finally {
             workspace.flushProjectPersistence(); reopenedWorkspace.flushProjectPersistence()
             vm.close(); reopened.close(); workspace.close(); reopenedWorkspace.close()

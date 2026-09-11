@@ -285,7 +285,8 @@ fun FrameWindowScope.PSD2LiveApp(
 					val totalWidth = maxWidth
 					val splitRatio = state.workspaceSplitRatio
 
-					val leftWidth = totalWidth * splitRatio
+					val sourcePage = state.activeWorkspaceTab == WorkspaceTab.SEE_THROUGH
+					val leftWidth = if (sourcePage) totalWidth else totalWidth * splitRatio
 					val rightWidth = (totalWidth - leftWidth - 4.dp).coerceAtLeast(0.dp)
 
 					var rowCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
@@ -301,8 +302,10 @@ fun FrameWindowScope.PSD2LiveApp(
 							state = state,
 							viewModel = viewModel,
 							modifier = Modifier.width(leftWidth).fillMaxHeight(),
+							sourceWorkflow = { SourceWorkflowPage(viewModel, window) },
 						)
 
+						if (!sourcePage) {
 						// Resizable Splitter Handle
 						Box(
 							modifier = Modifier
@@ -344,6 +347,7 @@ fun FrameWindowScope.PSD2LiveApp(
 							onChooseOutput = chooseOutputFolder,
 							modifier = Modifier.width(rightWidth).fillMaxHeight(),
 						)
+						}
 					}
 				}
 

@@ -266,6 +266,18 @@ afterEvaluate {
 }
 
 // Opt-in live local inference. Never part of check; does not start or stop See-Through.
+tasks.register<JavaExec>("sourceWorkflowPageCheck") {
+    dependsOn(tasks.testClasses)
+    classpath = sourceSets["test"].runtimeClasspath
+    mainClass.set("io.github.psd2live.workflow.SourceWorkflowPageCheck")
+    javaLauncher.set(javaToolchains.launcherFor { languageVersion.set(JavaLanguageVersion.of(21)) })
+    maxHeapSize = "4g"
+    systemProperty("java.awt.headless", "true")
+    doFirst {
+        args(providers.gradleProperty("workflowImage").get(), providers.gradleProperty("workflowPsd").get(), providers.gradleProperty("workflowOutput").get())
+    }
+}
+
 tasks.register<JavaExec>("sourceWorkflowLiveCheck") {
     dependsOn(tasks.testClasses)
     classpath = sourceSets["test"].runtimeClasspath

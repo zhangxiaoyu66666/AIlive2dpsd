@@ -1627,7 +1627,7 @@ class PSD2LiveViewModel : AutoCloseable {
 	private fun startMotionLoop() {
 		motionJob = scope.launch {
 			while (isActive) {
-                if (!presentationActive) { lastTick = System.nanoTime(); delay(100); continue }
+                if (!presentationActive || _state.value.activeWorkspaceTab == WorkspaceTab.SEE_THROUGH) { lastTick = System.nanoTime(); delay(100); continue }
 				val now = System.nanoTime()
 				val dt = ((now - lastTick) / 1_000_000_000.0).coerceIn(0.001, 0.08).toFloat()
 				lastTick = now

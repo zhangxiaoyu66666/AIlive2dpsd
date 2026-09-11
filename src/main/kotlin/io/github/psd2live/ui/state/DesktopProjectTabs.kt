@@ -45,6 +45,7 @@ class DesktopProjectTabs : AutoCloseable {
         // Reserve before publishing the tab so a concurrent Save As cannot take its source path.
         if (path != null) paths.claim(id, path)
         val vm = PSD2LiveViewModel()
+        vm.setWorkspaceTab(WorkspaceTab.SEE_THROUGH)
         val workspace = ViewModelAgentWorkspace(vm)
         vm.attachAgentWorkspace(workspace)
         vm.presentationActive = false
@@ -52,13 +53,21 @@ class DesktopProjectTabs : AutoCloseable {
         vm.claimProjectPath = { paths.claim(id, it) }
         vm.claimExportPath = { paths.claim(id, it, directory = true) }
         val tab = DesktopProjectTab(id, vm, workspace)
+        vm.sourceWorkflow.openImportedVersion = { targetId ->
+            val existing = mutable.value.tabs.firstOrNull { it.id == targetId }
+            if (existing != null) { existing.viewModel.setWorkspaceTab(WorkspaceTab.TOPOLOGY); select(targetId) }
+            existing != null
+        }
         vm.sourceWorkflow.importVersion = { version, lineage, activate ->
             val destination = if (vm.state.value.analysis == null) tab else create(activate = false)
             destination.viewModel.setSourceWorkflow(lineage)
             destination.viewModel.setInputPath(version.snapshot)
             destination.viewModel.setOutputPath(Path.of(version.path).parent.resolve("${Path.of(version.path).fileName.toString().substringBeforeLast('.')}-${version.sha256.take(8)}-${destination.id.take(8)}-export").toString())
             destination.viewModel.analyze()
-            if (activate) select(destination.id)
+            if (activate) {
+                destination.viewModel.setWorkspaceTab(WorkspaceTab.TOPOLOGY)
+                select(destination.id)
+            }
             destination.id
         }
         // Tab listing reads only the cheap immutable UI summary, never hashes every model's history.

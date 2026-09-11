@@ -9,6 +9,31 @@ import java.nio.file.Files
 import kotlin.test.*
 
 class SourceWorkflowControllerTest {
+    @Test fun editButtonConfirmsImportsAndReturnsToExistingEditor() = runBlocking<Unit> {
+        val root = Files.createTempDirectory("psd2live-project-edit-button-")
+        val vm = PSD2LiveViewModel().apply { presentationActive = false }
+        val controller = SourceWorkflowController(vm, root)
+        try {
+            val source = Files.write(root.resolve("model.psd"), syntheticPsd())
+            controller.execute("stage_result", buildJsonObject { put("path", source.toString()) })
+            withTimeout(10000) { controller.state.first { !it.busy } }
+            var imports = 0
+            var returned = false
+            controller.importVersion = { version, lineage, activate ->
+                assertTrue(activate)
+                assertEquals(version.sha256, lineage.confirmed!!.sha256)
+                imports++
+                "editor-tab"
+            }
+            controller.openImportedVersion = { assertEquals("editor-tab", it); returned = true; true }
+            controller.editInApplication()
+            withTimeout(10000) { controller.state.first { it.importedTabId == "editor-tab" && !it.busy } }
+            controller.editInApplication()
+            assertTrue(returned)
+            assertEquals(1, imports)
+        } finally { controller.close(); vm.close(); ProjectArchive.deleteTemporaryDirectory(root) }
+    }
+
     @Test fun importRequiresReviewedHashAndKeepsManualRevisionLineage() = runBlocking<Unit> {
         val root = Files.createTempDirectory("psd2live-project-source-controller-test")
         val vm = PSD2LiveViewModel().apply { presentationActive = false }

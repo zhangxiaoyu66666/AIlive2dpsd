@@ -10,6 +10,7 @@ class DesktopProjectTabsTest {
             val controller = DesktopProjectTabs()
             try {
                 val a = controller.state.value.tabs.single()
+                assertEquals(io.github.psd2live.ui.state.WorkspaceTab.SEE_THROUGH, a.viewModel.state.value.activeWorkspaceTab)
                 a.viewModel.setStateForTest(a.viewModel.state.value.copy(inputPath = "a.psd", outputPath = "a-export", projectDirty = true, projectEditVersion = 4))
                 val saved = a.viewModel.state.value
                 val b = controller.create()

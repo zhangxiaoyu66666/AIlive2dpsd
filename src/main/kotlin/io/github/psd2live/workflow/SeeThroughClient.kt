@@ -21,6 +21,7 @@ import java.nio.file.Files
 import java.nio.file.Path
 
 data class DecomposeOptions(val resolution: Int = 1024, val seed: Int = 42, val split: Boolean = true, val offload: Boolean = true)
+data class SeeThroughCapabilities(val endpoint: String, val defaults: DecomposeOptions)
 
 /** The existing Gradio HTTP API; no fork of See-Through or model process management. */
 class SeeThroughClient(private val http: HttpClient = HttpClient(CIO) {
@@ -30,13 +31,20 @@ class SeeThroughClient(private val http: HttpClient = HttpClient(CIO) {
     install(HttpTimeout) { connectTimeoutMillis = 5000; socketTimeoutMillis = 90000 }
 }) : AutoCloseable {
     suspend fun connect(endpoint: String): String {
+        return describe(endpoint).endpoint
+    }
+
+    suspend fun describe(endpoint: String): SeeThroughCapabilities {
         val base = endpoint(endpoint)
         val info = Json.parseToJsonElement(http.get("$base/gradio_api/info").bodyAsText()).jsonObject
         val function = info["named_endpoints"]?.jsonObject?.get("/decompose")?.jsonObject
             ?: error("This Gradio service does not expose /decompose")
         val names = function["parameters"]?.jsonArray?.map { it.jsonObject["parameter_name"]?.jsonPrimitive?.content }
         require(names == listOf("image", "resolution", "seed", "split", "offload")) { "Unsupported See-Through /decompose input contract" }
-        return base
+        val parameters = function.getValue("parameters").jsonArray.associate { it.jsonObject.getValue("parameter_name").jsonPrimitive.content to it.jsonObject }
+        fun default(name: String) = parameters[name]?.get("parameter_default") as? JsonPrimitive
+        return SeeThroughCapabilities(base, DecomposeOptions(default("resolution")?.intOrNull ?: 1024,
+            default("seed")?.intOrNull ?: 42, default("split")?.booleanOrNull ?: true, default("offload")?.booleanOrNull ?: true))
     }
 
     suspend fun submit(endpoint: String, image: Path, options: DecomposeOptions, expectedImageHash: String? = null): String = withContext(Dispatchers.IO) {

@@ -49,7 +49,7 @@ fun FrameWindowScope.DesktopTabsApp(
             agentConnectionInfo = connection, agentStartupError = startupError, onCloseRequest = onClose,
             onOpenPath = controller::open,
             onNewTab = { controller.create() }, onCloseTab = { controller.requestClose(active.id) },
-            projectTabs = { ProjectTabBar(controller, tabs); SourceWorkflowPanel(active.viewModel, window) },
+            projectTabs = { ProjectTabBar(controller, tabs) },
         )
     }
 }

@@ -22,6 +22,7 @@ enum class WorkspaceTab {
 	TOPOLOGY,
 	PREVIEW,
 	HISTORY,
+	SEE_THROUGH,
 	LOG,
 }
 

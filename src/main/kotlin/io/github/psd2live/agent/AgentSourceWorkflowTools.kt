@@ -15,8 +15,8 @@ internal fun registerSourceWorkflowTools(server: Server, workspace: AgentWorkspa
     }
     server.addWorkspaceTool(tabs, workspace, "source_workflow", "Connect to local See-Through, upload and start decomposition, resume its event, stage/confirm exact PSD SHA-256, or import a reviewed version. Loaded models import into a new tab; returned importedTabId must be claimed separately. Actions are asynchronous and never auto-retry GPU submissions. cancel_wait stops waiting, not the server's job. stage_result also accepts a manually edited PSD.",
         inputSchema = ToolSchema(properties = buildJsonObject {
-            putJsonObject("action") { put("type", "string"); put("enum", JsonArray(listOf("connect", "decompose", "resume", "stage_result", "confirm", "stage_import", "import", "check_source", "cancel_wait", "generate", "save_psd").map(::JsonPrimitive))) }
-            listOf("endpoint", "image", "path", "sha256", "output", "expected_history_head_node_id").forEach { key -> putJsonObject(key) { put("type", "string") } }
+            putJsonObject("action") { put("type", "string"); put("enum", JsonArray(listOf("connect", "select_image", "decompose", "resume", "stage_result", "confirm", "stage_import", "import", "check_source", "cancel_wait", "generate", "save_psd").map(::JsonPrimitive))) }
+            listOf("endpoint", "image", "path", "sha256", "output", "expected_image_sha256", "expected_history_head_node_id").forEach { key -> putJsonObject(key) { put("type", "string") } }
             listOf("resolution", "seed").forEach { key -> putJsonObject(key) { put("type", "integer") } }
             listOf("split", "offload").forEach { key -> putJsonObject(key) { put("type", "boolean") } }
         }, required = listOf("action")),

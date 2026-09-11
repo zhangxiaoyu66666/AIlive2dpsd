@@ -107,6 +107,7 @@ fun WorkspaceView(
 	state: PSD2LiveState,
 	viewModel: PSD2LiveViewModel,
 	modifier: Modifier = Modifier,
+	sourceWorkflow: @Composable () -> Unit = {},
 ) {
 	val colors = LocalToolColors.current
 	val typography = LocalToolTypography.current
@@ -115,11 +116,13 @@ fun WorkspaceView(
 		tr("tab.topology"),
 		tr("tab.preview"),
 		tr("tab.history"),
+		tr("tab.seeThrough"),
 	)
 	val selectedTabIndex = when (state.activeWorkspaceTab) {
 		WorkspaceTab.TOPOLOGY -> 0
 		WorkspaceTab.PREVIEW -> 1
 		WorkspaceTab.HISTORY -> 2
+		WorkspaceTab.SEE_THROUGH -> 3
 		else -> 1
 	}
 
@@ -137,7 +140,8 @@ fun WorkspaceView(
 				val tab = when (index) {
 					0 -> WorkspaceTab.TOPOLOGY
 					1 -> WorkspaceTab.PREVIEW
-					else -> WorkspaceTab.HISTORY
+					2 -> WorkspaceTab.HISTORY
+					else -> WorkspaceTab.SEE_THROUGH
 				}
 				viewModel.setWorkspaceTab(tab)
 			},
@@ -147,12 +151,13 @@ fun WorkspaceView(
 		Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
 			when (state.activeWorkspaceTab) {
 				WorkspaceTab.HISTORY -> HistoryTreeView(state, viewModel)
+				WorkspaceTab.SEE_THROUGH -> sourceWorkflow()
 				else -> HierarchyView(state, viewModel)
 			}
 		}
 
 		// Independent Bottom Log Dock (underneath Hierarchy / Topology / Preview / History)
-		BottomLogDock(
+		if (state.activeWorkspaceTab != WorkspaceTab.SEE_THROUGH) BottomLogDock(
 			state = state,
 			viewModel = viewModel,
 		)
