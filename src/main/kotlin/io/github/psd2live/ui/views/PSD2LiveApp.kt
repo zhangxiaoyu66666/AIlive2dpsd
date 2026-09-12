@@ -79,16 +79,11 @@ import io.github.psd2live.ui.utils.NativeFilePicker
 import java.awt.Cursor
 import java.awt.Desktop
 import java.awt.Toolkit
-import java.awt.datatransfer.DataFlavor
 import java.awt.datatransfer.StringSelection
-import java.awt.dnd.DnDConstants
-import java.awt.dnd.DropTarget
-import java.awt.dnd.DropTargetAdapter
-import java.awt.dnd.DropTargetDropEvent
-import java.io.File
 import java.nio.file.Files
 import java.nio.file.Path
 import javax.swing.JOptionPane
+import io.github.psd2live.ui.utils.projectFileDrop
 
 @Composable
 fun FrameWindowScope.PSD2LiveApp(
@@ -109,6 +104,13 @@ fun FrameWindowScope.PSD2LiveApp(
 	val state by viewModel.state.collectAsState()
 	var showAboutDialog by remember { mutableStateOf(false) }
 	var showAgentDialog by remember { mutableStateOf(false) }
+    val openInputPath: (Path) -> Unit = { path ->
+        if (onOpenPath != null) onOpenPath(path)
+        else if (path.fileName.toString().endsWith(".psd2live", true)) viewModel.openProject(path)
+        else viewModel.withSavedChanges {
+            viewModel.setInputPath(path.toString()); viewModel.setWorkspaceTab(WorkspaceTab.PREVIEW); viewModel.analyze()
+        }
+    }
 
 	viewModel.confirmUnsavedChanges = {
         JOptionPane.showOptionDialog(window, tr("project.unsaved"), tr("project.save"), JOptionPane.DEFAULT_OPTION,
@@ -118,27 +120,6 @@ fun FrameWindowScope.PSD2LiveApp(
     // Language key tracking for recomposition
 	val currentLanguage = state.currentLanguage
 
-	// Window Drop Target for PSD Drag & Drop
-	DisposableEffect(window, viewModel) {
-		window?.dropTarget = DropTarget(window, DnDConstants.ACTION_COPY, object : DropTargetAdapter() {
-			override fun drop(event: DropTargetDropEvent) {
-				try {
-					event.acceptDrop(DnDConstants.ACTION_COPY)
-					@Suppress("UNCHECKED_CAST")
-					val files = event.transferable.getTransferData(DataFlavor.javaFileListFlavor) as List<File>
-					files.firstOrNull { it.extension.lowercase() in setOf("psd", "psd2live") }?.let { file ->
-                        if (onOpenPath != null) onOpenPath(file.toPath())
-                        else if (file.extension.equals("psd2live", true)) viewModel.openProject(file.toPath())
-                        else viewModel.withSavedChanges { viewModel.setInputPath(file.absolutePath); viewModel.analyze() }
-                    }
-					event.dropComplete(true)
-				} catch (failure: Exception) {
-					event.dropComplete(false)
-				}
-			}
-		}, true)
-        onDispose { window?.dropTarget = null }
-	}
 
 	CompactToolTheme {
 		val colors = LocalToolColors.current
@@ -185,8 +166,7 @@ fun FrameWindowScope.PSD2LiveApp(
 			if (!isBusy) {
 				val selected = NativeFilePicker.choosePsdFile(window, state.inputPath)
 				if (!selected.isNullOrBlank()) {
-					if (onOpenPath != null) onOpenPath(Path.of(selected))
-                    else viewModel.withSavedChanges { viewModel.setInputPath(selected); viewModel.analyze() }
+					openInputPath(Path.of(selected))
 				}
 			}
 		}
@@ -194,7 +174,7 @@ fun FrameWindowScope.PSD2LiveApp(
 		val onOpenProjectAction: () -> Unit = {
 			val selected = NativeFilePicker.chooseProjectFile(window, state.projectFile)
 			if (!selected.isNullOrBlank()) {
-				if (onOpenPath != null) onOpenPath(Path.of(selected)) else viewModel.openProject(Path.of(selected))
+				openInputPath(Path.of(selected))
 			}
 		}
         val onReanalyzeAction = {
@@ -212,6 +192,10 @@ fun FrameWindowScope.PSD2LiveApp(
 		Box(
 			modifier = Modifier
 				.fillMaxSize()
+                .projectFileDrop(onOpen = openInputPath, onError = { message ->
+                    viewModel.addLog(message)
+                    JOptionPane.showMessageDialog(window, message, tr("app.title"), JOptionPane.WARNING_MESSAGE)
+                })
 				.border(BorderStroke(1.dp, colors.border))
 				.onPreviewKeyEvent { event ->
 					if (event.type == KeyEventType.KeyDown && event.isCtrlPressed) {

@@ -45,7 +45,7 @@ class DesktopProjectTabs : AutoCloseable {
         // Reserve before publishing the tab so a concurrent Save As cannot take its source path.
         if (path != null) paths.claim(id, path)
         val vm = PSD2LiveViewModel()
-        vm.setWorkspaceTab(WorkspaceTab.SEE_THROUGH)
+        vm.setWorkspaceTab(if (path == null) WorkspaceTab.SEE_THROUGH else WorkspaceTab.PREVIEW)
         val workspace = ViewModelAgentWorkspace(vm)
         vm.attachAgentWorkspace(workspace)
         vm.presentationActive = false
@@ -55,7 +55,7 @@ class DesktopProjectTabs : AutoCloseable {
         val tab = DesktopProjectTab(id, vm, workspace)
         vm.sourceWorkflow.openImportedVersion = { targetId ->
             val existing = mutable.value.tabs.firstOrNull { it.id == targetId }
-            if (existing != null) { existing.viewModel.setWorkspaceTab(WorkspaceTab.TOPOLOGY); select(targetId) }
+            if (existing != null) { existing.viewModel.setWorkspaceTab(WorkspaceTab.PREVIEW); select(targetId) }
             existing != null
         }
         vm.sourceWorkflow.importVersion = { version, lineage, activate ->
@@ -63,9 +63,9 @@ class DesktopProjectTabs : AutoCloseable {
             destination.viewModel.setSourceWorkflow(lineage)
             destination.viewModel.setInputPath(version.snapshot)
             destination.viewModel.setOutputPath(Path.of(version.path).parent.resolve("${Path.of(version.path).fileName.toString().substringBeforeLast('.')}-${version.sha256.take(8)}-${destination.id.take(8)}-export").toString())
+            destination.viewModel.setWorkspaceTab(WorkspaceTab.PREVIEW)
             destination.viewModel.analyze()
             if (activate) {
-                destination.viewModel.setWorkspaceTab(WorkspaceTab.TOPOLOGY)
                 select(destination.id)
             }
             destination.id
@@ -87,7 +87,7 @@ class DesktopProjectTabs : AutoCloseable {
         if (activate || mutable.value.activeId == null) select(id)
         if (path != null) {
             if (path.fileName.toString().endsWith(".psd2live", true)) vm.openProject(path)
-            else { vm.sourceWorkflow.action("stage_result", "path" to path.toString()) }
+            else { vm.setInputPath(path.toString()); vm.analyze() }
         }
         return tab
     }

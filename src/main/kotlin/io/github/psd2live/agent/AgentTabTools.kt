@@ -50,7 +50,7 @@ internal fun Server.addTabTools(tabs: AgentWorkspaceTabs) {
     addTool("tab_list", "List project tabs and their agent names; never returns lease tokens.", toolAnnotations = read) {
         tabJson(tabs.manifest())
     }
-    addTool("tab_create", "Create an independent background tab. A .psd path stages a candidate for source_workflow_get/confirm/import; a .psd2live path opens a project, poll project_get_state. Duplicate project paths are rejected.",
+    addTool("tab_create", "Create an independent background tab. A .psd path imports directly into preview; a .psd2live path opens a project. Poll project_get_state until loaded=true and busy=false before editing. Duplicate project paths are rejected.",
         inputSchema = schema("path", required = emptyList()), toolAnnotations = write) { request -> tabResult {
         val id = checkNotNull(tabs.createTab) { "Tab creation unavailable" }(request.arguments?.get("path")?.jsonPrimitive?.content)
         tabJson(buildJsonObject { put("tab_id", id) })

@@ -5,8 +5,11 @@
 ## 使用
 
 - 标题栏下方显示工程标签、未保存星号、认领智能体名称。
+- 标签超出窗口宽度时可以拖动下方横向滚动条；新建、选中或返回工程时，当前标签自动滚入可见区域。滚动位置不随工程内容重建而重置。
 - “新建标签 +”或 Ctrl+N 创建空工程；Ctrl+W 关闭当前标签。
 - 打开工程、导入 PSD 和拖放文件均打开新标签；已经打开的路径会切回原标签。
+- PSD 直接分析并进入“预览”，不再转到 See-Through API 候选页。空白新标签仍提供 See-Through 入口；在该页确认并导入后也进入预览。
+- 文件拖放绑定 Compose 内容区，与菜单共用打开入口，支持一次拖入多个 PSD/PSD2Live 文件。拖入时边框高亮；不支持的文件与传输异常会显示明确提示。
 - 每个标签拥有独立 ViewModel、参数、撤销历史、素材引用、任务记录、日志、导出设置和 Cubism 预览会话。切换标签暂停后台界面动画，MCP 仍可读写后台工程。
 - 关闭标签逐一检查未保存修改。加载、导出、保存和 MCP 操作进行中拒绝关闭；确认期间发生新的未保存编辑也拒绝关闭。
 - “解除认领”使当前标签的旧操作凭证立即失效；操作执行中需等待结束后再解除。
@@ -17,7 +20,7 @@
 1. `tab_list` 查看标签，或 `tab_create({"path":"M:\\AI_Pet\\模型.psd2live"})` 创建后台标签。path 可省略，支持 PSD/PSD2Live 绝对路径。路径重复则拒绝；创建不是幂等操作，响应不确定时先查询列表。
 2. `tab_claim({"tab_id":"返回的 ID","agent_name":"眼部修复"})` 取得私有 `lease_id`。
 3. 所有工程工具必须带 `tab_id`；写工具还必须带对应 `lease_id`。例如 `project_get_state({"tab_id":"…"})`、`project_save({"tab_id":"…","lease_id":"…"})`。
-4. `.psd` 先进入制作流程候选，需要 `source_workflow` 确认、导入（见 [制作流程](source-workflow.md)）；`.psd2live` 直接打开。导入后等待 `project_get_state` 显示 `loaded=true` 且 `busy=false` 再编辑；打开失败时读取 `errorMessage`。修改仍需遵守原来的 `expected_history_head_node_id` 契约。
+4. `.psd` 直接导入预览；`.psd2live` 打开已保存工程。两者都需等待 `project_get_state` 显示 `loaded=true` 且 `busy=false` 再编辑；打开失败时读取 `errorMessage`。需要拆图及版本确认时使用独立的 [制作流程](source-workflow.md)。修改仍需遵守原来的 `expected_history_head_node_id` 契约。
 5. 完成后 `tab_release({"tab_id":"…","lease_id":"…"})`。MCP 连接重连保留认领；丢失凭证可由用户在界面解除。
 
 同一标签的工具调用串行，不同标签可以并行；用户切换界面不参与 MCP 路由。未知、缺失或已关闭 ID 均报错，不会退回当前标签。列表不公开操作凭证。认领用于避免协作误操作，不构成不同用户/账户之间的安全沙箱：所有连接仍共享本地 MCP 服务的授权。
@@ -31,6 +34,12 @@
 每个标签的资源在关闭时释放。未显示标签暂停界面帧循环；程序不会为每个标签另起 MCP 端口。现有端口和连接配置保持不变，客户端重新连接新版后获取新增工具和参数。
 
 ## 验证
+
+2026-09-12 标签导航修复：202 项测试通过，失败/错误/跳过均为 0；打包运行时 MemoryUtil/NFD/COM 门禁通过。`projectTabsUiCheck` 在真实 Compose 离屏场景中创建 12 个工程，实际拖动滚动条并验证首尾标签自动可见、工程内容重建后滚动仍有效；使用实际 PSD 直接导入并生成预览截图，没有进入制作流程候选。文件传输测试覆盖标准 Explorer 文件列表、中文/空格、重复文件、多个受支持文件、无效文件和非文件数据；导入测试覆盖编辑历史初始化与后台 MCP 标签不抢占用户选择。
+
+截图和日志位于 `build/tab-navigation-qa`、`build/tab-navigation-release.log`，发行目录为 `build/compose/tab-navigation-binaries/main/app/PSD2Live`。Windows Explorer 向新版窗口的真实拖放未由智能体操作；离屏检查不替代原生拖放验收。
+
+实现核对日期 2026-09-12：[Compose Desktop 滚动条](https://kotlinlang.org/docs/multiplatform/compose-desktop-scrollbars.html)、[Compose 拖放](https://kotlinlang.org/docs/multiplatform/compose-drag-drop.html)。接收器使用 Compose 内容节点，移除外层 JFrame 的独立 DropTarget，避免窗口和内容表面的两套接收逻辑。
 
 - 使用官方 Kotlin MCP SDK 的两个独立客户端连接临时测试服务，验证工具清单、跨标签读写、错用凭证、释放、关闭和创建。
 - 并发测试覆盖同标签串行、跨标签不阻塞、操作中拒绝关闭、取消后恢复。

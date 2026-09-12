@@ -315,3 +315,16 @@ tasks.register<JavaExec>("sourceWorkflowResumeCheck") {
         args(providers.gradleProperty("workflowMetadata").get(), providers.gradleProperty("workflowOutput").get(), providers.gradleProperty("workflowImage").get())
     }
 }
+
+tasks.register<JavaExec>("projectTabsUiCheck") {
+    dependsOn(tasks.testClasses)
+    classpath = sourceSets["test"].runtimeClasspath
+    mainClass.set("io.github.psd2live.ui.ProjectTabsUiCheck")
+    javaLauncher.set(javaToolchains.launcherFor { languageVersion.set(JavaLanguageVersion.of(21)) })
+    systemProperty("java.awt.headless", "true")
+    maxHeapSize = "4g"
+    doFirst {
+        args(layout.buildDirectory.dir("tab-navigation-qa").get().asFile.absolutePath)
+        providers.gradleProperty("workflowPsd").orNull?.let { args(it) }
+    }
+}
