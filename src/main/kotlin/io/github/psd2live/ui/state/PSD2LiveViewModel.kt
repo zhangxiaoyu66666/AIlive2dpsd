@@ -242,7 +242,11 @@ class PSD2LiveViewModel : AutoCloseable {
 		},
 		onStatus = { status ->
 			if (status != "ready") _sdkFrame.value = null
-			_state.update { it.copy(sdkStatus = status) }
+			_state.update { current ->
+				val updated = current.copy(sdkStatus = status)
+				if (status != null && status != "ready" && status != current.sdkStatus)
+					updated.withLog(status, level = LogLevel.WARNING, tag = "Cubism Preview") else updated
+			}
 		},
 	)
 

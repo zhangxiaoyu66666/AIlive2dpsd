@@ -239,6 +239,7 @@ class ViewModelAgentWorkspace(
 			busy = state.isAnalyzing || state.isGenerating || recoveringProjectId != null,
 			status = state.statusText,
             errorMessage = state.errorMessage,
+            sdkStatus = state.sdkStatus,
 			selectedLayerId = state.selectedLayerId,
 			layers = layers,
 			parameters = state.previewModel?.rig?.puppet?.parameters.orEmpty().map { parameter ->

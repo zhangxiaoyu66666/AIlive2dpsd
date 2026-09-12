@@ -93,6 +93,7 @@ fun FrameWindowScope.PSD2LiveApp(
 	agentConnectionInfo: AgentMcpConnectionInfo? = null,
 	agentStartupError: String? = null,
 	onOpenPath: ((Path) -> Unit)? = null,
+    onDropPath: ((Path) -> Unit)? = null,
     onNewTab: (() -> Unit)? = null,
     onCloseTab: (() -> Unit)? = null,
     projectTabs: @Composable () -> Unit = {},
@@ -192,7 +193,7 @@ fun FrameWindowScope.PSD2LiveApp(
 		Box(
 			modifier = Modifier
 				.fillMaxSize()
-                .projectFileDrop(onOpen = openInputPath, onError = { message ->
+                .projectFileDrop(onOpen = onDropPath ?: openInputPath, onError = { message ->
                     viewModel.addLog(message)
                     JOptionPane.showMessageDialog(window, message, tr("app.title"), JOptionPane.WARNING_MESSAGE)
                 })

@@ -24,6 +24,17 @@ internal class TabPathClaims {
 
     @Synchronized fun release(tabId: String) { owners.entries.removeIf { it.value.tabId == tabId } }
 
+    @Synchronized fun release(tabId: String, path: Path) {
+        val target = key(path)
+        if (owners[target]?.tabId == tabId) owners.remove(target)
+    }
+
+    @Synchronized fun retainOnly(tabId: String, path: Path) {
+        claim(tabId, path)
+        val target = key(path)
+        owners.entries.removeIf { it.value.tabId == tabId && it.key != target }
+    }
+
     private fun key(path: Path): String {
         var existing = path.toAbsolutePath().normalize()
         val tail = mutableListOf<String>()

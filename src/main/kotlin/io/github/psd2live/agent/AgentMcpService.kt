@@ -1563,6 +1563,7 @@ private fun AgentProjectSnapshot.toJson(
     put("projectDirty", projectDirty)
     put("projectSaving", projectSaving)
     projectSaveError?.let { put("projectSaveError", it) }
+    sdkStatus?.let { put("sdkStatus", it) }
 	put("loaded", loaded)
 	inputName?.let { put("inputName", it) }
 	canvasWidth?.let { put("canvasWidth", it) }

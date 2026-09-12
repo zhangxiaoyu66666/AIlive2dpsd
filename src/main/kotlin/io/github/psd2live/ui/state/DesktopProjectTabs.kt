@@ -8,6 +8,7 @@ import io.github.psd2live.i18n.tr
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.serialization.json.*
 import java.nio.file.Files
 import java.nio.file.Path
@@ -15,7 +16,7 @@ import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 
 data class DesktopProjectTab(val id: String, val viewModel: PSD2LiveViewModel, val workspace: ViewModelAgentWorkspace)
-data class DesktopTabsState(val tabs: List<DesktopProjectTab> = emptyList(), val activeId: String? = null, val ownershipVersion: Long = 0)
+data class DesktopTabsState(val tabs: List<DesktopProjectTab> = emptyList(), val activeId: String? = null, val ownershipVersion: Long = 0, val openingTabs: Set<String> = emptySet())
 
 /** UI lifecycle lives on Main; MCP routing remains independent of selection. */
 class DesktopProjectTabs : AutoCloseable {
@@ -44,6 +45,19 @@ class DesktopProjectTabs : AutoCloseable {
         val id = UUID.randomUUID().toString()
         // Reserve before publishing the tab so a concurrent Save As cannot take its source path.
         if (path != null) paths.claim(id, path)
+        val tab = prepareTab(id, path)
+        val vm = tab.viewModel
+        registerTab(tab)
+        mutable.value = mutable.value.copy(tabs = mutable.value.tabs + tab)
+        if (activate || mutable.value.activeId == null) select(id)
+        if (path != null) {
+            if (path.fileName.toString().endsWith(".psd2live", true)) vm.openProject(path)
+            else { vm.setInputPath(path.toString()); vm.analyze() }
+        }
+        return tab
+    }
+
+    private fun prepareTab(id: String, path: Path?): DesktopProjectTab {
         val vm = PSD2LiveViewModel()
         vm.setWorkspaceTab(if (path == null) WorkspaceTab.SEE_THROUGH else WorkspaceTab.PREVIEW)
         val workspace = ViewModelAgentWorkspace(vm)
@@ -70,6 +84,11 @@ class DesktopProjectTabs : AutoCloseable {
             }
             destination.id
         }
+        return tab
+    }
+
+    private fun registerTab(tab: DesktopProjectTab) {
+        val id = tab.id; val vm = tab.viewModel; val workspace = tab.workspace
         // Tab listing reads only the cheap immutable UI summary, never hashes every model's history.
         agents.register(id, workspace) {
             val current = vm.state.value
@@ -78,18 +97,11 @@ class DesktopProjectTabs : AutoCloseable {
                 put("input_name", current.projectSourceName?.let(::JsonPrimitive)
                     ?: current.inputPath.takeIf { it.isNotBlank() }?.let { JsonPrimitive(Path.of(it).fileName.toString()) } ?: JsonNull)
                 put("dirty", current.projectDirty)
-                put("busy", current.isAnalyzing || current.isGenerating || current.projectSaving || vm.sourceWorkflow.state.value.busy)
+                put("busy", current.isAnalyzing || current.isGenerating || current.projectSaving || vm.sourceWorkflow.state.value.busy || id in mutable.value.openingTabs)
                 put("loaded", current.analysis != null)
                 current.errorMessage?.let { put("errorMessage", it) }
             }
         }
-        mutable.value = mutable.value.copy(tabs = mutable.value.tabs + tab)
-        if (activate || mutable.value.activeId == null) select(id)
-        if (path != null) {
-            if (path.fileName.toString().endsWith(".psd2live", true)) vm.openProject(path)
-            else { vm.setInputPath(path.toString()); vm.analyze() }
-        }
-        return tab
     }
 
     fun open(path: Path) {
@@ -97,6 +109,67 @@ class DesktopProjectTabs : AutoCloseable {
             val existing = paths.owner(path)
             if (existing != null) select(existing) else create(path)
         } catch (failure: Exception) { reportError(failure.message ?: tr("tabs.openFailed")) }
+    }
+
+    /** Replace the active slot only after the new file has loaded; errors keep the existing model. */
+    fun openInCurrent(path: Path) {
+        val current = mutable.value.tabs.firstOrNull { it.id == mutable.value.activeId } ?: return
+        try {
+            require(Files.isRegularFile(path)) { tr("dialog.inputInvalid", path) }
+            require(path.fileName.toString().substringAfterLast('.').lowercase() in setOf("psd", "psd2live")) { tr("drop.unsupported") }
+            check(!tabBusy(current)) { tr("tabs.busy") }
+            val previousOwner = paths.owner(path)
+            check(previousOwner == null || previousOwner == current.id) { tr("tabs.pathConflict", path) }
+            current.viewModel.withSavedChanges {
+                if (tabBusy(current) || mutable.value.tabs.none { it === current }) { reportError(tr("tabs.busy")); return@withSavedChanges }
+                val editVersion = current.viewModel.state.value.projectEditVersion
+                mutable.value = mutable.value.copy(openingTabs = mutable.value.openingTabs + current.id)
+                scope.launch {
+                    var replacement: DesktopProjectTab? = null
+                    var installed = false
+                    try {
+                        paths.claim(current.id, path)
+                        val candidate = prepareTab(current.id, path).also { replacement = it }
+                        candidate.viewModel.setLanguage(current.viewModel.state.value.currentLanguage)
+                        if (path.fileName.toString().endsWith(".psd2live", true)) candidate.viewModel.openProject(path)
+                        else { candidate.viewModel.setInputPath(path.toString()); candidate.viewModel.analyze() }
+                        candidate.viewModel.state.first { !it.isAnalyzing }
+                        check(candidate.viewModel.state.value.analysis != null && candidate.viewModel.state.value.errorMessage == null) {
+                            candidate.viewModel.state.value.errorMessage ?: tr("tabs.openFailed")
+                        }
+                        check(agents.tryRemove(current.id) {
+                            val unchanged = mutable.value.tabs.any { it === current } && !tabBusy(current, includeOpening = false) &&
+                                current.viewModel.state.value.projectEditVersion == editVersion
+                            // Resolve filesystem claims before revoking the old workspace; failure keeps it usable.
+                            if (unchanged) paths.retainOnly(current.id, path)
+                            unchanged
+                        }) { tr("tabs.busy") }
+                        candidate.viewModel.setWorkspaceTab(WorkspaceTab.PREVIEW)
+                        registerTab(candidate)
+                        mutable.value = mutable.value.copy(tabs = mutable.value.tabs.map { if (it === current) candidate else it })
+                        installed = true
+                        current.viewModel.close()
+                        withContext(Dispatchers.IO) { current.workspace.close() }
+                        if (mutable.value.activeId == candidate.id) select(candidate.id)
+                    } catch (cancelled: CancellationException) { throw cancelled }
+                    catch (failure: Exception) { reportError(failure.message ?: tr("tabs.openFailed")) }
+                    finally {
+                        if (!installed) {
+                            replacement?.viewModel?.close()
+                            replacement?.workspace?.close()
+                            if (previousOwner == null) paths.release(current.id, path)
+                        }
+                        mutable.value = mutable.value.copy(openingTabs = mutable.value.openingTabs - current.id)
+                    }
+                }
+            }
+        } catch (failure: Exception) { reportError(failure.message ?: tr("tabs.openFailed")) }
+    }
+
+    private fun tabBusy(tab: DesktopProjectTab, includeOpening: Boolean = true): Boolean {
+        val current = tab.viewModel.state.value
+        return current.isAnalyzing || current.isGenerating || current.projectSaving || tab.viewModel.sourceWorkflow.state.value.busy ||
+            includeOpening && tab.id in mutable.value.openingTabs
     }
 
     fun select(id: String) {
@@ -111,7 +184,7 @@ class DesktopProjectTabs : AutoCloseable {
         val previousActive = mutable.value.activeId
         val position = mutable.value.tabs.indexOf(tab)
         val snapshot = tab.viewModel.state.value
-        if (snapshot.isAnalyzing || snapshot.isGenerating || snapshot.projectSaving || tab.viewModel.sourceWorkflow.state.value.busy) { reportError(tr("tabs.busy")); return }
+        if (tabBusy(tab)) { reportError(tr("tabs.busy")); return }
         if (snapshot.projectDirty) select(id)
         tab.viewModel.withSavedChanges {
             // The user may have explicitly discarded dirty changes. Recheck ongoing work under the MCP gate.

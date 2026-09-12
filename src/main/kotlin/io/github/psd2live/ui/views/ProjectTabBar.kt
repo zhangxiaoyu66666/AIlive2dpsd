@@ -14,6 +14,11 @@ import androidx.compose.material.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.onPointerEvent
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
@@ -29,11 +34,21 @@ import io.github.psd2live.ui.theme.LocalToolColors
 import java.nio.file.Path
 
 @Composable
+@OptIn(ExperimentalComposeUiApi::class)
 internal fun ProjectTabBar(controller: DesktopProjectTabs, tabs: DesktopTabsState, scroll: ScrollState) {
     val colors = LocalToolColors.current
+    val wheelStep = with(LocalDensity.current) { 40.dp.toPx() }
     var viewportWidth by remember { mutableIntStateOf(0) }
     Row(Modifier.fillMaxWidth().height(46.dp).background(colors.windowBackground), verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f).fillMaxHeight().onSizeChanged { viewportWidth = it.width }) {
+        Column(Modifier.weight(1f).fillMaxHeight().onSizeChanged { viewportWidth = it.width }
+            .onPointerEvent(PointerEventType.Scroll, pass = PointerEventPass.Initial) { event ->
+                val delta = event.changes.firstOrNull()?.scrollDelta
+                if (delta != null) {
+                    val distance = if (kotlin.math.abs(delta.x) > kotlin.math.abs(delta.y)) delta.x else delta.y
+                    scroll.dispatchRawDelta(distance * wheelStep)
+                    event.changes.forEach { it.consume() }
+                }
+            }) {
             Row(Modifier.fillMaxWidth().weight(1f).horizontalScroll(scroll), verticalAlignment = Alignment.CenterVertically) {
                 tabs.tabs.forEach { tab -> key(tab.id) {
                     val project by tab.viewModel.state.collectAsState()
@@ -52,11 +67,11 @@ internal fun ProjectTabBar(controller: DesktopProjectTabs, tabs: DesktopTabsStat
                         .selectable(selected, role = Role.Tab, onClick = { controller.select(tab.id) })
                         .padding(start = 10.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
-                            Text(title + if (project.projectDirty) " *" else "", color = if (selected) colors.textPrimary else colors.textMuted,
+                            Text(title + if (tab.id in tabs.openingTabs) " · " + tr("tabs.opening") else if (project.projectDirty) " *" else "", color = if (selected) colors.textPrimary else colors.textMuted,
                                 fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             controller.agents.owner(tab.id)?.let { Text(tr("tabs.agent", it), color = colors.selectionText, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) }
                         }
-                        CompactButton(text = "×", modifier = Modifier.semantics { contentDescription = tr("tabs.close", title) }, onClick = { controller.requestClose(tab.id) }, enabled = !project.projectSaving && !project.isGenerating && !project.isAnalyzing && !workflow.busy)
+                        CompactButton(text = "×", modifier = Modifier.semantics { contentDescription = tr("tabs.close", title) }, onClick = { controller.requestClose(tab.id) }, enabled = !project.projectSaving && !project.isGenerating && !project.isAnalyzing && !workflow.busy && tab.id !in tabs.openingTabs)
                     }
                     Spacer(Modifier.width(1.dp))
                 } }

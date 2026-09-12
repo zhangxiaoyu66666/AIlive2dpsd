@@ -328,3 +328,13 @@ tasks.register<JavaExec>("projectTabsUiCheck") {
         providers.gradleProperty("workflowPsd").orNull?.let { args(it) }
     }
 }
+
+tasks.register<JavaExec>("previewRenderCheck") {
+    dependsOn(tasks.testClasses)
+    classpath = sourceSets["test"].runtimeClasspath
+    mainClass.set("io.github.psd2live.ui.PreviewRenderCheck")
+    javaLauncher.set(javaToolchains.launcherFor { languageVersion.set(JavaLanguageVersion.of(21)) })
+    systemProperty("java.awt.headless", "true")
+    maxHeapSize = "4g"
+    doFirst { args(providers.gradleProperty("workflowPsd").get(), layout.buildDirectory.dir("preview-stutter-qa").get().asFile.absolutePath) }
+}

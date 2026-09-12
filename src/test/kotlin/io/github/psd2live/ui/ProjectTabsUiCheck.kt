@@ -49,6 +49,12 @@ object ProjectTabsUiCheck {
                     settle()
                     check(scroll.maxValue > 0 && scroll.value == 0) { "Tab overflow did not produce a scroll range" }
                     capture("tabs-start.png")
+                    scene.sendPointerEvent(PointerEventType.Scroll, Offset(120f, 18f), scrollDelta = Offset(0f, 3f))
+                    settle()
+                    check(scroll.value >= 100) { "A normal vertical mouse wheel did not scroll the tab strip horizontally" }
+                    scene.sendPointerEvent(PointerEventType.Scroll, Offset(120f, 18f), scrollDelta = Offset(0f, -3f))
+                    settle()
+                    check(scroll.value == 0) { "Reverse mouse wheel did not scroll back" }
                     // Drag the visible horizontal thumb from the left towards the middle.
                     scene.sendPointerEvent(PointerEventType.Press, Offset(60f, 41f), button = PointerButton.Primary)
                     scene.sendPointerEvent(PointerEventType.Move, Offset(450f, 41f))
@@ -63,7 +69,7 @@ object ProjectTabsUiCheck {
                     controller.select(tabs.first().id)
                     settle()
                     check(scroll.value == 0) { "Selected first tab was not brought back into view" }
-                    println("PROJECT_TABS_UI_OK count=${tabs.size} scrollbar_drag=true active_tab_reveal=true keyed_switch=true range=${scroll.maxValue}")
+                    println("PROJECT_TABS_UI_OK count=${tabs.size} mouse_wheel=true scrollbar_drag=true active_tab_reveal=true keyed_switch=true range=${scroll.maxValue}")
                 } finally { scene.close() }
                 if (args.size > 1) {
                     controller.open(Path.of(args[1]))
@@ -86,6 +92,20 @@ object ProjectTabsUiCheck {
                     try {
                         repeat(30) { previewScene.render(System.nanoTime()).close(); delay(16) }
                         previewScene.render(System.nanoTime()).use { image -> image.encodeToData()!!.use { Files.write(output.resolve("import-preview.png"), it.bytes) } }
+                        val base = imported.viewModel.state.value
+                        for (overlay in listOf(false, true)) {
+                            val times = mutableListOf<Double>()
+                            repeat(30) { index ->
+                                imported.viewModel.setStateForTest(base.copy(
+                                    parameterValues = base.parameterValues + (org.umamo.runtime.model.ParameterId("ParamAngleX") to (index - 15f)),
+                                    hoveredLayerId = if (overlay) base.previewModel!!.rig.layerIdByDrawableId.values.first() else null))
+                                delay(1)
+                                val started = System.nanoTime()
+                                previewScene.render(System.nanoTime()).close()
+                                if (index >= 5) times += (System.nanoTime() - started) / 1e6
+                            }
+                            println("COMPOSE_PREVIEW_FRAME overlay=$overlay median_ms=${times.sorted()[times.size / 2]} p95_ms=${times.sorted()[(times.size * .95).toInt()]}")
+                        }
                     } finally { previewScene.close() }
                     println("DIRECT_PSD_PREVIEW_OK layers=${imported.viewModel.state.value.analysis!!.layers.size} sourceWorkflowCandidate=${imported.viewModel.sourceWorkflow.state.value.candidate != null}")
                 }

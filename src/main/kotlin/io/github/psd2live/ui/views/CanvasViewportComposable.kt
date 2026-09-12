@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -35,6 +36,7 @@ import androidx.compose.ui.graphics.TileMode
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.toComposeImageBitmap
+import androidx.compose.ui.graphics.skiaCanvas
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -57,6 +59,7 @@ import io.github.psd2live.ui.CanvasCamera
 import io.github.psd2live.ui.CanvasViewport
 import io.github.psd2live.ui.ComponentPalette
 import io.github.psd2live.ui.RigCanvasSupport
+import io.github.psd2live.ui.SkiaRigTextures
 import io.github.psd2live.ui.state.PSD2LiveState
 import io.github.psd2live.ui.state.PSD2LiveViewModel
 import io.github.psd2live.ui.state.WorkspaceTab
@@ -95,6 +98,8 @@ fun CanvasViewportComposable(
 	val fpsCounter = remember { ActualFpsCounter() }
 
 	val previewModel = state.previewModel
+	val rigTextures = remember(previewModel) { previewModel?.let(::SkiaRigTextures) }
+	DisposableEffect(rigTextures) { onDispose { rigTextures?.close() } }
 	val sdkFrame by viewModel.sdkFrame.collectAsState()
 	val sdkBitmap = remember(sdkFrame?.image) { sdkFrame?.image?.toComposeImageBitmap() }
 	val checkerboardBrush = remember(colors.checkerLight, colors.checkerDark) {
@@ -104,17 +109,7 @@ fun CanvasViewportComposable(
 	val currentPanX by rememberUpdatedState(panX)
 	val currentPanY by rememberUpdatedState(panY)
 
-	LaunchedEffect(viewModel) {
-		viewModel.sdkFrame.collect { frame ->
-			if (frame == null) {
-				fpsCounter.reset()
-				fps = 0f
-			} else {
-				val measured = fpsCounter.record(System.nanoTime())
-				if (measured != null) fps = measured
-			}
-		}
-	}
+	LaunchedEffect(previewModel, mode) { fpsCounter.reset(); fps = 0f }
 
 	fun resetCamera() {
 		zoom = 1.0
@@ -335,32 +330,23 @@ fun CanvasViewportComposable(
 			if (canUseNativeSdk && currentSdkBitmap != null) {
 				drawImage(currentSdkBitmap)
 			} else {
+				val geometry = RigCanvasSupport.evaluate(model, if (mode == WorkspaceTab.PREVIEW) informationPose else state.parameterValues)
+				if (showTexture) {
+					val textureAlpha = when (mode) {
+						WorkspaceTab.TOPOLOGY -> 0.26f
+						WorkspaceTab.HIERARCHY -> 0.43f
+						else -> 1.0f
+					}
+					rigTextures?.draw(drawContext.canvas.skiaCanvas, geometry, viewport, textureAlpha,
+						targetVisibleLayerIds, state.drawOrderOverrides, state.dimUnselected, highlightedLayerIds)
+				}
+				// Java2D remains only for the small editor annotation layer, never textured meshes.
+				if (showMesh || showWarp || mode == WorkspaceTab.HIERARCHY ||
+					state.showSelectionBounds && hasActiveSelection || state.hoveredLayerId != null || state.hoveredDeformerId != null) {
 				val buffer = BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB)
 				val g = buffer.createGraphics()
 				try {
 					g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
-					val geometry = RigCanvasSupport.evaluate(model, if (mode == WorkspaceTab.PREVIEW) informationPose else state.parameterValues)
-
-					// 3a. Texture Channel
-					if (showTexture) {
-						val textureAlpha = when (mode) {
-							WorkspaceTab.TOPOLOGY -> 0.26f
-							WorkspaceTab.HIERARCHY -> 0.43f
-							else -> 1.0f
-						}
-						RigCanvasSupport.paintTexturedRig(
-							g,
-							model,
-							geometry,
-							viewport,
-							textureAlpha,
-							visibleLayerIds = targetVisibleLayerIds,
-							drawOrderOverrides = state.drawOrderOverrides,
-							dimUnselected = state.dimUnselected,
-							highlightedLayerIds = highlightedLayerIds,
-							dimmedAlphaMultiplier = 0.22f,
-						)
-					}
 
 					// 3b. Mesh Channel (Wireframe)
 					if (showMesh) {
@@ -536,7 +522,10 @@ fun CanvasViewportComposable(
 					g.dispose()
 				}
 				drawImage(buffer.toComposeImageBitmap())
+				}
 			}
+			// Count displayed canvas updates, including the editor renderer, not SDK frame production.
+			fpsCounter.record(System.nanoTime())?.let { fps = it }
 		}
 
 		// Overlay: Empty hint or Stats Badge
@@ -561,7 +550,7 @@ fun CanvasViewportComposable(
 						if (previewModel.hasRuntimePhysics) "canvas.preview.cubismPhysicsOn" else "canvas.preview.cubismPhysicsOff",
 						zoomPct,
 					)}"
-					state.sdkStatus != null && state.sdkStatus != "ready" -> "${fpsStr}${tr("canvas.preview.softwareFallback", zoomPct)}"
+					state.sdkStatus != null && state.sdkStatus != "ready" -> "${fpsStr}${tr("canvas.preview.skia", zoomPct)}"
 					previewModel.hasRuntimePhysics -> "${fpsStr}${tr("canvas.preview.physicsOn", zoomPct)}"
 					else -> "${fpsStr}${tr("canvas.preview.physicsOff", zoomPct)}"
 				}

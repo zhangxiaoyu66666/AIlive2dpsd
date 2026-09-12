@@ -14,7 +14,7 @@ import java.io.File
 import java.nio.file.Files
 import java.nio.file.Path
 
-/** Explorer's standard file-list transfer; the same open action is used by the menu and drop. */
+/** Explorer's standard file-list transfer; opening policy belongs to the tab controller. */
 internal object ProjectFileDrop {
     fun supports(transfer: Transferable) = transfer.isDataFlavorSupported(DataFlavor.javaFileListFlavor)
 
@@ -44,7 +44,8 @@ internal fun Modifier.projectFileDrop(onOpen: (Path) -> Unit, onError: (String) 
                 return try {
                     val paths = ProjectFileDrop.read(event.awtTransferable)
                     if (paths.isEmpty()) { error(tr("drop.unsupported")); false }
-                    else { paths.forEach(open); true }
+                    else if (paths.size != 1) { error(tr("drop.singleFile")); false }
+                    else { open(paths.single()); true }
                 } catch (failure: Exception) { error(tr("drop.failed", failure.message.orEmpty())); false }
             }
         }

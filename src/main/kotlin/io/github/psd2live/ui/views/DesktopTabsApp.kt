@@ -28,11 +28,12 @@ fun FrameWindowScope.DesktopTabsApp(
     }
     controller.reportError = { JOptionPane.showMessageDialog(window, it, tr("app.title"), JOptionPane.WARNING_MESSAGE) }
     val active = tabs.tabs.firstOrNull { it.id == tabs.activeId }
-    if (active != null) key(active.id) {
+    if (active != null) key(active.id, active.viewModel) {
         PSD2LiveApp(
             viewModel = active.viewModel, window = window, windowState = windowState,
             agentConnectionInfo = connection, agentStartupError = startupError, onCloseRequest = onClose,
             onOpenPath = controller::open,
+            onDropPath = controller::openInCurrent,
             onNewTab = { controller.create() }, onCloseTab = { controller.requestClose(active.id) },
             projectTabs = { ProjectTabBar(controller, tabs, tabScroll) },
         )
