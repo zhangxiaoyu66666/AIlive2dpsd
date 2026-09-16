@@ -321,6 +321,10 @@ data class AgentViewOutputSpec(
 
 data class AgentModelViewRequest(
 	val annotateDeformerIds: Set<String> = emptySet(),
+	val annotatePathIds: Set<String> = emptySet(),
+	val annotatePathWidth: Boolean = false,
+	val annotatePathHardness: Boolean = false,
+	val annotatePathRadius: Boolean = false,
 	val pointIndices: Boolean = false,
 	val parameters: Map<String, Float> = emptyMap(),
 	/** Null uses current workspace visibility; an empty set deliberately renders no layers. */
@@ -350,6 +354,10 @@ data class AgentRenderedView(
 	val includedLayerIds: List<String> = emptyList(),
 	val annotatedLayerIds: List<String> = emptyList(),
 	val annotatedDeformerIds: List<String> = emptyList(),
+	val annotatedPathIds: List<String> = emptyList(),
+	val annotatedPathWidth: Boolean = false,
+	val annotatedPathHardness: Boolean = false,
+	val annotatedPathRadius: Boolean = false,
 	val pointIndices: Boolean = false,
 )
 
@@ -388,6 +396,14 @@ data class AgentWorkflowResult(val metadata: kotlinx.serialization.json.JsonObje
 
 interface AgentWorkspace {
     suspend fun sourceWorkflow(action: String, arguments: kotlinx.serialization.json.JsonObject): kotlinx.serialization.json.JsonObject = throw UnsupportedOperationException("Source workflow unavailable")
+    suspend fun observeAuthoring(arguments: kotlinx.serialization.json.JsonObject): AgentWorkflowResult =
+        throw UnsupportedOperationException("Version/motion observation unavailable")
+    suspend fun createArtwork(arguments: kotlinx.serialization.json.JsonObject): AgentWorkspaceMutationResult =
+        throw UnsupportedOperationException("Artwork creation unavailable")
+    suspend fun splitArtwork(arguments: kotlinx.serialization.json.JsonObject): AgentWorkspaceMutationResult =
+        throw UnsupportedOperationException("Artwork splitting unavailable")
+    suspend fun authorRig(state: String, edits: kotlinx.serialization.json.JsonArray): AgentWorkspaceMutationResult =
+        throw UnsupportedOperationException("Ordered authoring is unavailable")
     fun listRigObjectSummaries(): List<kotlinx.serialization.json.JsonObject> = listRigObjects().map {
         kotlinx.serialization.json.JsonObject(mapOf("kind" to kotlinx.serialization.json.JsonPrimitive(it.kind), "id" to kotlinx.serialization.json.JsonPrimitive(it.id)))
     }
@@ -410,6 +426,7 @@ interface AgentWorkspace {
     suspend fun checkpoint(summary: String): AgentWorkspaceMutationResult = throw UnsupportedOperationException("History checkpoints are not available")
 	fun snapshot(): AgentProjectSnapshot
 	fun history(): AgentHistorySnapshot = throw UnsupportedOperationException("Workspace history is not available")
+	fun currentPuppet(): org.umamo.runtime.model.PuppetModel? = null
 
 	suspend fun renderLayer(
 		layerId: String,

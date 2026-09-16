@@ -17,14 +17,20 @@ PSD2Live is an automated Live2D model generation pipeline and desktop applicatio
 
 ## Documentation Index
 
-| Document | Description |
-| :--- | :--- |
-| [User Guide (docs/en/USER_GUIDE.md)](docs/en/USER_GUIDE.md) | Desktop GUI, version-history tree, independent log dock, Agent/MCP connection, shortcuts, and CLI reference |
-| [Agent / MCP Product & Technical Design (Chinese)](docs/zh/AGENT_ARCHITECTURE.md) | Implemented MCP tools, persistent workspace/history model, image workflow, and delivery roadmap |
-| [Live2D SDK Setup Guide (docs/en/CUBISM_SDK_SETUP.md)](docs/en/CUBISM_SDK_SETUP.md) | Official Native SDK license policy, shader extraction, and hardware-accelerated preview setup |
-| [PSD Layer Specification (docs/en/PSD_LAYER_SPEC.md)](docs/en/PSD_LAYER_SPEC.md) | 31 semantic tags, side resolution rules, connected-component splitting, and layering guidelines |
-| [Deformer & Math Specification (docs/en/DEFORMER_AND_PARAMETER_SPEC.md)](docs/en/DEFORMER_AND_PARAMETER_SPEC.md) | Deformer tree topology, 9-pose facial lattice math, C1 roll curve, feature warps, and physics |
-| [Implementation Comparison (docs/en/IMPLEMENTATION_COMPARISON.md)](docs/en/IMPLEMENTATION_COMPARISON.md) | Technical comparison across 16 pipeline stages, coordinate invariants, and integrity verification |
+Documents are organized by **category × language** (`docs/<language>/<category>/`). See [`docs/README.md`](docs/README.md) for the full index and language availability.
+
+| Category | Document | Description |
+| :--- | :--- | :--- |
+| Guide | [User Guide](docs/en/guide/USER_GUIDE.md) | Desktop GUI, version-history tree, independent log dock, Agent/MCP connection, shortcuts, and CLI reference |
+| Guide | [Live2D SDK Setup Guide](docs/en/guide/CUBISM_SDK_SETUP.md) | Official Native SDK license policy, shader extraction, and hardware-accelerated preview setup |
+| Spec | [PSD Layer Specification](docs/en/spec/PSD_LAYER_SPEC.md) | 31 semantic tags, side resolution rules, connected-component splitting, and layering guidelines |
+| Spec | [Deformer & Math Specification](docs/en/spec/DEFORMER_AND_PARAMETER_SPEC.md) | Deformer tree topology, 9-pose facial lattice math, C1 roll curve, feature warps, and physics |
+| Spec | [Project Format (version 1)](docs/en/spec/PROJECT_FORMAT.md) | `.psd2live` archive layout, save/recovery semantics, validation rules, and UI/MCP entry points |
+| Spec | [Implementation Comparison](docs/en/spec/IMPLEMENTATION_COMPARISON.md) | Technical comparison across 16 pipeline stages, coordinate invariants, and integrity verification |
+| Agent | [MCP Interface Contract (Chinese)](docs/zh/agent/MCP_AUTHORING.md) | Currently callable MCP tools, parameter and return-value constraints, asset import, and knowledge entry points |
+| Agent | [Agent Design (Chinese)](docs/zh/agent/AGENT_DESIGN.md) | Product boundaries, hard constraints, tool convergence, continuous deformation fields, cost control, and staged acceptance |
+
+> The `agent` category is currently Chinese-only. Chinese additionally provides a [texture upscaling guide](docs/zh/guide/TEXTURE_UPSCALE.md) and a [summary of the project format](docs/zh/spec/PROJECT_FORMAT.md).
 
 ---
 
@@ -42,7 +48,7 @@ PSD2Live is an automated Live2D model generation pipeline and desktop applicatio
 - **Deformer (Warp) Generation**:
   - **Eye & Mouth Deformation**: Shared projective plane constraints for eyes and brows, iris counter-translation against perspective compression, and eyelash alpha-weighted centerline tracking for smooth closed U-curves; centripetal compression of full-open mouth toward central seam with auto-clipped teeth and tongue.
   - **Nine-Pose Lattice Construction**: `AngleX (±45°) × AngleY (±30°)` 8×8 facial lattice combining C1-continuous horizontal roll (near-side reveal, broad plateau preservation, far-side compression), vertical V/^ pitch curvature, and diagonal $C_{xy} = \text{yaw} \times \text{pitch}$ cross-terms.
-- **Animation**: Automated generation of a 6-second seamless looping `idle.motion3.json` covering breathing, subtle head/body sway, and natural eye blinks; desktop GUI supports optional integration with official Cubism 5-r.5 SDK native offscreen OpenGL rendering for **100% official rendering & physical dynamics parity (Ground Truth)** (this project does NOT include or redistribute proprietary SDK binaries, see [SDK Setup Guide](docs/en/CUBISM_SDK_SETUP.md); automatically falls back to pure CPU high-precision software rasterization when SDK is absent) with live mouse gaze tracking (Mouse Look).
+- **Animation**: Automated generation of a 6-second seamless looping `idle.motion3.json` covering breathing, subtle head/body sway, and natural eye blinks; desktop GUI supports optional integration with official Cubism 5-r.5 SDK native offscreen OpenGL rendering for **100% official rendering & physical dynamics parity (Ground Truth)** (this project does NOT include or redistribute proprietary SDK binaries, see [SDK Setup Guide](docs/en/guide/CUBISM_SDK_SETUP.md); automatically falls back to pure CPU high-precision software rasterization when SDK is absent) with live mouse gaze tracking (Mouse Look).
 - **Physics**: Decoupled front and back hair following the head container with root-pinned, $v^3$ cubic tip sway multi-pendulum dynamics; eyelid closure velocity driving second-order damped harmonic oscillators for pupil jelly squash/stretch dynamics (`ParamEyeBallForm`).
 - **Editable Agent / MCP Workspace**: A bearer-authenticated local Streamable HTTP MCP lets ChatGPT/Codex, Gemini/Antigravity, and other MCP hosts inspect the project, render spatially reversible PNG Views, import transparent assets, manage parameters, and edit multidimensional keyforms on meshes, warp/rotation deformers, parts, and glue. Every mutation enters a persistent, append-only branch history with resumable task checkpoints.
 - **Project & Runtime Export**: Synchronized one-click export of editable Live2D Cubism Modeler 5 `.cmo3` projects and `.moc3` runtime families (`.model3.json`, `.cdi3.json`, `physics3.json`, `idle.motion3.json`, and texture atlases); enforced three-stage geometric integrity gates (neutral pose fidelity, extreme angle bounds, and warp lattice mirror symmetry).
@@ -50,37 +56,26 @@ PSD2Live is an automated Live2D model generation pipeline and desktop applicatio
 <p align="center">
   <img src="docs/imgs/agent.png" alt="PSD2Live AI Agent asset generation, integration, and multi-parameter render workflow" />
   <br>
-  <em>An example of an Agent adding a hair clip: reading Skills and MCP tools, inspecting the model, generating and adding the asset, and checking other parameter poses. This example does not establish that the more complex tasks below are available.</em>
+  <em>An example of an Agent adding a hair clip: reading MCP workflows and tools, inspecting the model, generating and adding the asset, and checking other parameter poses. This example does not establish that the more complex tasks below are available.</em>
 </p>
 
 ### Agent Capabilities and Implementation Status
 
-#### Available
+Planned work is listed in [`ROADMAP.md`](ROADMAP.md) and measured capability results are in [`STATUS.md`](STATUS.md). Both are Chinese-only.
 
-- Add other hair accessories or decorations, then check occlusion, placement, and deformation across multiple parameter poses.
-
-#### Theoretically feasible, but Agents cannot get reliable results yet — pending implementation
+- **Available**: add hair accessories or decorations, then check occlusion, placement and deformation across parameter poses.
+- **Pending**: parameter tuning, expression and action variants, simple layer separation, mouth-internal separation, hair separation with occlusion fill, waving motion, tail deformation and physics, generated artwork with nine-axis adjustment.
+- **Beyond reach**: precise per-point deformation of a part, which requires driving Warp and Mesh points individually.
 
 > [!WARNING]
-> **The following tasks are theoretically feasible, but Agents cannot reliably configure and complete them. End-to-end execution is extremely unstable, and these capabilities remain pending implementation. Unless you are debugging the program, we recommend not attempting them.** Existing MCP interfaces do not mean an Agent can complete a task; repeated generation, positioning, and correction can quickly consume large amounts of tokens and image-generation quota without producing a usable result.
-
-Expected implementation difficulty increases in the following order:
-
-1. Generate expression and action variants with additional parameter or animation controls, such as an `@v@` expression, waving, or crossing both arms.
-2. Separate the mouth into independently editable lips, inner mouth, teeth, and tongue layers.
-3. Separate the hair into front, side, back, ahoge, or other independently riggable strands, and reconstruct hidden regions.
-4. Add shadows, including generating and rigging hair-shadow layers and side-of-face shadow layers.
-
-#### Currently beyond the Agent's capabilities
-
-- Deform parts plausibly and precisely: this requires the AI to manipulate individual Warp/Mesh points and control their deformation correctly. Agents cannot yet perform this reliably.
+> Pending tasks are extremely unstable end to end. Unless you are debugging the program, we recommend not attempting them. Existing MCP interfaces do not mean an Agent can complete a task; repeated generation, positioning and correction can quickly consume large amounts of tokens and image-generation quota without producing a usable result.
 
 > [!IMPORTANT]
 > These workflows require both the selected model and the Agent harness to expose a working image-generation capability. A model that can only understand text or images, but cannot generate and return an image, cannot complete asset creation and import.
 
-Results depend on the model, image generator, Agent harness, prompt, and the quality of the original PSD layer separation. Passing regression tests for the underlying tools does not establish the reliability of the pending tasks above.
+Results depend on the model, image generator, Agent harness, prompt, and the quality of the original PSD layer separation. Passing regression tests for the underlying tools does not establish the reliability of those tasks.
 
-**Help wanted: Pull Requests for prompt engineering and Agent workflows.** We especially need contributors with experience in tool discovery and selection, depth and occlusion reasoning for part separation, generation constraints, positioning and correction workflows, token budgets, and stopping conditions. Reproducible cases, effective prompt or Skill improvements, workflow implementations, and evaluation cases are welcome. Where possible, include the model and host used, actual consumption, and both successful and failed results so we can assess completion rates and reduce wasted retries. A single successful demonstration is not enough to mark these capabilities as complete.
+**Help wanted: prompt engineering and Agent workflow contributions.** We especially need help with tool discovery and selection, depth and occlusion reasoning for part separation, generation constraints, positioning and correction workflows, token budgets, and stopping conditions. Reproducible cases, effective prompt or MCP workflow improvements, implementations, and evaluation cases are welcome. Including the model and host used, actual consumption, and both successful and failed results helps us verify whether a change really raises completion rates and reduces wasted retries. A single successful demonstration is not enough to mark these capabilities as complete. For general ways to take part, see [Contributing](#contributing).
 
 ---
 
@@ -89,7 +84,7 @@ Results depend on the model, image generator, Agent harness, prompt, and the qua
 ### Prerequisites
 - **Java Runtime**: Windows packages downloaded from Releases include a runtime. JDK 21 or higher is required only when building or launching from source with Gradle.
 - **Operating System**: Windows 10/11 x64 (supports 100% pixel-perfect official rendering & physics parity when configured with official Native SDK), Linux / macOS (software rasterization)
-- **Live2D Official SDK Notice**: Source code and release packages **do NOT include or redistribute** official Live2D proprietary SDK binaries. Full pipeline generation and CPU preview work 100% out of the box. To enable official runtime consistency verification on Windows, please refer to the [Live2D SDK Setup Guide](docs/en/CUBISM_SDK_SETUP.md).
+- **Live2D Official SDK Notice**: Source code and release packages **do NOT include or redistribute** official Live2D proprietary SDK binaries. Full pipeline generation and CPU preview work 100% out of the box. To enable official runtime consistency verification on Windows, please refer to the [Live2D SDK Setup Guide](docs/en/guide/CUBISM_SDK_SETUP.md).
 
 ### Launching the Desktop GUI
 
@@ -118,14 +113,14 @@ Results depend on the model, image generator, Agent harness, prompt, and the qua
 
 #### Connecting an AI Agent / MCP Host
 
-1. Keep the PSD2Live desktop app running and open **Agent / MCP → Agent / MCP Connection & Prompts…**.
+1. Keep the PSD2Live desktop app running and open **Tools → MCP → MCP Connection & Prompts…**.
 2. Copy the matching configuration: HTTP TOML for ChatGPT desktop/Codex, or HTTP JSON for Gemini/Antigravity. Other Streamable HTTP hosts use the displayed endpoint and `Authorization: Bearer <token>` header; do not change it to the legacy `/sse` endpoint.
 3. Use the Stdio JSON fallback only for hosts without HTTP MCP support. It runs the repository-root `mcp_proxy.py` with Python 3 and reads `PSD2LIVE_MCP_TOKEN`; on Windows it can also read the token saved by PSD2Live.
-4. For domain workflows, install `.agent/skills/psd2live-rigging` and `.agent/skills/hair-separation` in the host's documented skill directory. List tools and call `project_get_state` first.
+4. List tools after connecting, then call `inspect` (`scope: project`) for the project and history HEAD summary.
 
-The MCP currently exposes project/layer/parameter reads, object and keyform editing, parameter CRUD, model-data PNG Views, transparent-asset import, soft deletion, resumable tasks, and append-only branch history. Every project edit that advances `HEAD` must use the latest `expected_history_head_node_id`. After a timeout or disconnect, inspect `project_get_state` and `history_list` before deciding whether to retry.
+The MCP currently exposes project/layer/parameter reads, object and keyform editing, parameter CRUD, model-data PNG Views, transparent-asset import, soft deletion, and append-only branch history. Every project edit that advances `HEAD` must use the latest `state`. After a timeout or disconnect, call `inspect` (`scope: project`) and `revision` (`list`) before deciding whether to retry.
 
-PSD2Live provides model Views, spatial mapping and PNG import. Artwork can use original pixels, SVG, painting or an available image editor according to style and user preference. Native PNG alpha is retained when solid_background is omitted. Optional knowledge is available through agent_get_workflow (overview, geometry, hair, variants, face, assets). See [MCP authoring](docs/zh/MCP_AUTHORING.md).
+PSD2Live provides model Views, spatial mapping and PNG import. Artwork can use original pixels, SVG, painting or an available image editor according to style and user preference. Native PNG alpha is retained when solid_background is omitted. See the [MCP interface contract](docs/zh/agent/MCP_AUTHORING.md).
 
 ---
 
@@ -163,7 +158,7 @@ PSD2Live provides model Views, spatial mapping and PNG import. Artwork can use o
 > - **Initial head tilt supported**: Initial character head tilt is permitted; the pipeline automatically estimates this initial angle and uses it as the neutral origin to calibrate rotation limits.
 > - **Body must remain upright (excessive tilt unsupported)**: Kinematics and breathing rely on a vertical canvas frame; severely tilted or reclining poses are unsupported.
 > 
-> See [PSD Layer Specification (docs/en/PSD_LAYER_SPEC.md)](docs/en/PSD_LAYER_SPEC.md) for full rules.
+> See the [PSD Layer Specification](docs/en/spec/PSD_LAYER_SPEC.md) for full rules.
 
 | Component | Recommended English | Aliases (ZH / JA) | Behavior |
 | :--- | :--- | :--- | :--- |
@@ -236,6 +231,49 @@ output_dir/
 # Execute unit and integration tests
 .\gradlew.bat test
 ```
+
+---
+
+## Contributing
+
+Contributions of every kind are welcome, whether you are an illustrator, a Live2D rigger, a developer, or someone who has just started using the tool. **Issues and pull requests are equally valuable**, and there is no change too small to be worth sending.
+
+### Opening an issue
+
+Please open an issue for problems, questions or ideas:
+
+- **Bug reports**: crashes, failed exports, mesh or physics anomalies, results that do not match expectations.
+- **PSD compatibility problems**: a layered PSD that is misclassified or fails to generate. Attaching a reproducible PSD, or describing its layer naming, helps enormously.
+- **Feature requests**: new parts, new parameters, new export options, or automation that saves you work.
+- **Documentation and tutorial gaps**: anything unclear, missing steps, or text that no longer matches the interface.
+- **Showcases and field notes**: models you built with PSD2Live, pitfalls you hit, and layering tricks that worked.
+
+Including the PSD2Live version, your operating system, the PSD layer structure and naming, reproduction steps, expected versus actual results, and any log-dock output or screenshots makes triage much faster. Incomplete reports are fine too, and we will work out the details together.
+
+### Sending a pull request
+
+**Pull requests of any size are welcome**, from fixing a typo to implementing a whole new algorithm:
+
+- **Documentation**: typo fixes, extra tutorial steps, and translations. The `en` and `ja` documents still have gaps, see the [documentation index](docs/README.md).
+- **Tests and fixtures**: coverage for existing behaviour, PSD samples that reproduce a problem, and better evaluation cases.
+- **Bug fixes**: from edge cases to geometry and physics solving.
+- **Features and algorithms**: meshing, deformer construction, physics parameters, export compatibility.
+- **Agent and MCP workflows**: prompts, tool design and selection strategy, separation and placement flows, token budgets and stop conditions. This area needs the most help right now; see the [Agent design](docs/zh/agent/AGENT_DESIGN.md) document.
+- **Performance and platforms**: startup time, memory use, and behaviour on Linux and macOS.
+
+Before you start:
+
+1. Open an issue describing what you intend to change, so we can avoid duplicate work and agree on the direction.
+2. Branch from `master`, keep the change focused, and write commit messages that explain what changed and why.
+3. Reference the related issue in the pull request description and describe how you verified the change, for example with screenshots or generated model files.
+
+### Areas that are not stable yet
+
+Several capabilities are documented as theoretically possible but not yet reliable, such as automatic hair separation or Agent-generated expression variants. Contributions there are especially welcome: even a small gain in success rate, or simply recording why an attempt failed, is real progress. Background and acceptance criteria live in the [Agent design](docs/zh/agent/AGENT_DESIGN.md) document and [ROADMAP.md](ROADMAP.md).
+
+If you are not sure where to start, open an issue describing your idea, your use case, or the area you would like to work on. We are glad to find a good entry point together.
+
+Thank you to everyone who files an issue, shares a case, or sends code. This project is better because of you.
 
 ---
 

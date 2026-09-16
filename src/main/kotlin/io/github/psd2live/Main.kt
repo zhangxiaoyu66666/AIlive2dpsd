@@ -19,6 +19,7 @@ import kotlin.io.path.absolutePathString
 import androidx.compose.ui.window.rememberWindowState
 
 fun main(arguments: Array<String>) {
+	System.setProperty("sun.java2d.uiScale.enabled", "true")
 	configureLanguage(arguments)
 	if (arguments.isEmpty()) {
 		val tabs = DesktopProjectTabs()
@@ -78,6 +79,15 @@ fun main(arguments: Array<String>) {
 	val options = CliOptions.parse(arguments)
 	val config = PipelineConfig(
 		atlasSize = options.int("--atlas", 4096),
+        textureUpscale = io.github.psd2live.core.TextureUpscaleConfig(
+            scale = options.value("--upscale")?.toInt() ?: 1,
+            python = options.value("--upscale-python") ?: "python",
+            nunifDirectory = options.value("--nunif-dir") ?: "",
+            modelDirectory = options.value("--upscale-model") ?: "",
+            tileSize = options.value("--upscale-tile")?.toInt() ?: 256,
+            noiseLevel = options.value("--upscale-noise")?.toInt() ?: 1,
+            neuralAlpha = !options.flags.contains("--no-upscale-neural-alpha"),
+        ),
 		meshSpacing = options.int("--mesh-spacing", 64),
 		headTurnStrength = options.float("--head-strength", 1f),
 		bodyStrength = options.float("--body-strength", 1f),
@@ -110,7 +120,19 @@ private fun configureLanguage(arguments: Array<String>) {
 	I18n.setLanguage(language)
 }
 
-private fun printUsage() = println(tr("cli.usage"))
+private fun printUsage() {
+    println(tr("cli.usage"))
+    println("""
+        Texture upscale (optional local nunif):
+          --upscale <1|2|4>          Default 1 (off)
+          --upscale-python <path>    Python executable with nunif dependencies
+          --nunif-dir <path>         nunif source checkout
+          --upscale-model <path>     Explicit Art weights directory
+          --upscale-tile <64..512>   Input tile size; default 256, batch 1, no TTA
+          --upscale-noise <-1..3>    Denoise/sharpen level: -1 (none), 0 (clean art/sharp), 1 (medium, default), 2 (high), 3 (max)
+          --no-upscale-neural-alpha  Disable neural alpha (use bilinear fallback)
+    """.trimIndent())
+}
 
 private data class CliOptions(val values: Map<String, String>, val flags: Set<String>) {
 	fun value(name: String): String? = values[name]
@@ -119,8 +141,8 @@ private data class CliOptions(val values: Map<String, String>, val flags: Set<St
 	fun float(name: String, default: Float): Float = value(name)?.toFloatOrNull() ?: default
 
 	companion object {
-		private val flagNames = setOf("--no-physics", "--no-cmo3", "--no-moc3", "--mesh-only", "--no-deformers", "--no-motions", "--no-json")
-		private val valueNames = setOf("--input", "--output", "--lang", "--atlas", "--mesh-spacing", "--head-strength", "--body-strength")
+		private val flagNames = setOf("--no-upscale-neural-alpha", "--upscale-neural-alpha", "--no-physics", "--no-cmo3", "--no-moc3", "--mesh-only", "--no-deformers", "--no-motions", "--no-json")
+		private val valueNames = setOf("--upscale", "--upscale-noise", "--upscale-python", "--nunif-dir", "--upscale-model", "--upscale-tile", "--input", "--output", "--lang", "--atlas", "--mesh-spacing", "--head-strength", "--body-strength")
 		fun parse(arguments: Array<String>): CliOptions {
 			val values = linkedMapOf<String, String>()
 			val flags = linkedSetOf<String>()

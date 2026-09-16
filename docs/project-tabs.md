@@ -19,6 +19,8 @@
 
 ## 智能体流程
 
+2026-09-16 合并上游后，原有 MCP 工具继续保留，并新增上游的 `inspect`、`deform`、`form`、`rig`、`view`、`parameter`、`asset`、`physics`、`appearance`、`revision`、`path` 接口。所有工程接口仍必须在顶层传入 `tab_id`，写入还需顶层 `lease_id`；使用 `request` 包装参数的新接口也遵守此规则。新旧接口共用同一工程和操作锁，均不跟随当前可见标签。
+
 1. `tab_list` 查看标签，或 `tab_create({"path":"M:\\AI_Pet\\模型.psd2live"})` 创建后台标签。path 可省略，支持 PSD/PSD2Live 绝对路径。路径重复则拒绝；创建不是幂等操作，响应不确定时先查询列表。
 2. `tab_claim({"tab_id":"返回的 ID","agent_name":"眼部修复"})` 取得私有 `lease_id`。
 3. 所有工程工具必须带 `tab_id`；写工具还必须带对应 `lease_id`。例如 `project_get_state({"tab_id":"…"})`、`project_save({"tab_id":"…","lease_id":"…"})`。

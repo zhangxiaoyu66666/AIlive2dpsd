@@ -6,7 +6,7 @@ import kotlin.test.*
 
 internal class TabTestWorkspace(private val id: String) : AgentWorkspace {
     var writes = 0
-    override fun snapshot() = AgentProjectSnapshot(id, "$id-$writes", loaded = true, inputName = id,
+    override fun snapshot() = AgentProjectSnapshot(id, "$id-$writes", historyHeadNodeId = "$id-$writes", loaded = true, inputName = id,
         canvasWidth = 10, canvasHeight = 10, busy = false, status = "ready", selectedLayerId = null,
         layers = emptyList(), parameters = emptyList())
     override suspend fun checkpoint(summary: String): AgentWorkspaceMutationResult {

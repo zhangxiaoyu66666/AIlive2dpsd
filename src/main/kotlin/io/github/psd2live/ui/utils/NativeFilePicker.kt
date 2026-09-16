@@ -5,18 +5,20 @@ import java.awt.KeyboardFocusManager
 import java.awt.Window
 import java.nio.file.Path
 import java.util.concurrent.FutureTask
+import java.util.concurrent.atomic.AtomicBoolean
 import javax.swing.JOptionPane
 import javax.swing.SwingUtilities
 
 /** One entry point for every file dialog in both desktop frontends. */
 object NativeFilePicker {
+    private val isPicking = AtomicBoolean(false)
     private val controller by lazy {
         FilePickerController(if (System.getProperty("os.name").startsWith("Windows", true)) WindowsFilePicker else PortableFilePicker)
     }
 
-    fun chooseSavePsdFile(window: Window? = null, initialPath: String? = null): String? = choose(window) {
+    fun chooseSavePsdFile(window: Window? = null, initialPath: String? = null, defaultName: String? = null, initialDir: String? = null): String? = choose(window) {
         FilePickerRequest(FilePickerKind.SAVE_PSD, tr("flow.savePsd"), "psd", tr("dialog.psdFilter"),
-            path(initialPath)?.parent, path(initialPath)?.fileName?.toString() ?: "model.psd")
+            path(initialDir) ?: path(initialPath)?.parent, defaultName ?: path(initialPath)?.fileName?.toString() ?: "model.psd")
     }
 
     fun chooseImageFile(window: Window? = null, initialPath: String? = null): String? = choose(window) {
@@ -43,6 +45,8 @@ object NativeFilePicker {
     private fun path(value: String?): Path? = value?.takeIf { it.isNotBlank() }?.let(Path::of)
 
     private fun choose(window: Window?, request: () -> FilePickerRequest): String? {
+        if (!isPicking.compareAndSet(false, true)) return null
+        try {
         val task = FutureTask<String?> {
             val owner = window ?: KeyboardFocusManager.getCurrentKeyboardFocusManager().activeWindow
             try {
@@ -60,6 +64,7 @@ object NativeFilePicker {
         }
         if (SwingUtilities.isEventDispatchThread()) task.run() else SwingUtilities.invokeAndWait(task)
         return task.get()
+        } finally { isPicking.set(false) }
     }
 
     private fun showFailure(owner: Window?, failure: Throwable) {

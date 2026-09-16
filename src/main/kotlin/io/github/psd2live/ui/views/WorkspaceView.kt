@@ -80,6 +80,7 @@ import io.github.psd2live.ui.components.IconPlay
 import io.github.psd2live.ui.components.IconReset
 import io.github.psd2live.ui.components.IconSearch
 import io.github.psd2live.ui.components.IconTrash
+import io.github.psd2live.ui.components.IconDeformPath
 import io.github.psd2live.ui.components.DrawOrderRuler
 import io.github.psd2live.ui.components.DrawOrderInputDialog
 import io.github.psd2live.ui.components.MeshSettingsDialog
@@ -111,6 +112,7 @@ fun WorkspaceView(
 ) {
 	val colors = LocalToolColors.current
 	val typography = LocalToolTypography.current
+	var showDeformPaths by remember(state.projectOpenGeneration) { mutableStateOf(false) }
 
 	val tabTitles = listOf(
 		tr("tab.topology"),
@@ -126,41 +128,82 @@ fun WorkspaceView(
 		else -> 1
 	}
 
-	Column(
-		modifier = modifier
-			.fillMaxSize()
-			.background(colors.panelBackground)
-			.border(BorderStroke(1.dp, colors.divider)),
-	) {
-		// Tab Bar
-		CompactTabBar(
-			tabs = tabTitles,
-			selectedIndex = selectedTabIndex,
-			onTabSelected = { index ->
-				val tab = when (index) {
-					0 -> WorkspaceTab.TOPOLOGY
-					1 -> WorkspaceTab.PREVIEW
-					2 -> WorkspaceTab.HISTORY
-					else -> WorkspaceTab.SEE_THROUGH
-				}
-				viewModel.setWorkspaceTab(tab)
-			},
-		)
+	val canEditDeformPath = state.previewModel?.rig?.let { rig ->
+		rig.puppet.drawables.any { rig.layerIdByDrawableId[it.id.raw] == state.selectedLayerId && it.mesh != null }
+	} == true && state.historySnapshot != null && !state.isGenerating && !state.isAnalyzing
 
-		// Upper Main Workspace Area: Topology / Preview (with persistent hierarchy sidebar), History
-		Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
-			when (state.activeWorkspaceTab) {
-				WorkspaceTab.HISTORY -> HistoryTreeView(state, viewModel)
-				WorkspaceTab.SEE_THROUGH -> sourceWorkflow()
-				else -> HierarchyView(state, viewModel)
+	Box(modifier = modifier.fillMaxSize()) {
+		Column(
+			modifier = Modifier
+				.fillMaxSize()
+				.background(colors.panelBackground)
+				.border(BorderStroke(1.dp, colors.divider)),
+		) {
+			// Tab Bar Row with Integrated Trailing Tools
+			Row(
+				modifier = Modifier
+					.fillMaxWidth()
+					.height(26.dp)
+					.background(colors.windowBackground)
+					.border(BorderStroke(1.dp, colors.divider)),
+				verticalAlignment = Alignment.CenterVertically,
+			) {
+				Box(modifier = Modifier.weight(1f)) {
+					CompactTabBar(
+						tabs = tabTitles,
+						selectedIndex = selectedTabIndex,
+						onTabSelected = { index ->
+							val tab = when (index) {
+								0 -> WorkspaceTab.TOPOLOGY
+								1 -> WorkspaceTab.PREVIEW
+								2 -> WorkspaceTab.HISTORY
+								else -> WorkspaceTab.SEE_THROUGH
+							}
+							viewModel.setWorkspaceTab(tab)
+						},
+						modifier = Modifier.fillMaxWidth(),
+					)
+				}
+
+				if (canEditDeformPath) {
+					CompactButton(
+						text = tr("path.title"),
+						onClick = { showDeformPaths = true },
+						leadingIcon = {
+							IconDeformPath(modifier = Modifier.size(13.dp), tint = colors.accent)
+						},
+						height = 20.dp,
+						modifier = Modifier.padding(end = 6.dp),
+					)
+				}
 			}
+
+			// Upper Main Workspace Area: Topology / Preview (with persistent hierarchy sidebar), History
+			Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+				when (state.activeWorkspaceTab) {
+					WorkspaceTab.HISTORY -> HistoryTreeView(state, viewModel)
+					WorkspaceTab.SEE_THROUGH -> sourceWorkflow()
+					else -> HierarchyView(
+						state = state,
+						viewModel = viewModel,
+						onRequestOpenDeformPaths = { layerId ->
+							viewModel.selectLayer(layerId)
+							showDeformPaths = true
+						},
+					)
+				}
+			}
+
+			// Independent Bottom Log Dock (underneath Hierarchy / Topology / Preview / History)
+			if (state.activeWorkspaceTab != WorkspaceTab.SEE_THROUGH) BottomLogDock(
+				state = state,
+				viewModel = viewModel,
+			)
 		}
 
-		// Independent Bottom Log Dock (underneath Hierarchy / Topology / Preview / History)
-		if (state.activeWorkspaceTab != WorkspaceTab.SEE_THROUGH) BottomLogDock(
-			state = state,
-			viewModel = viewModel,
-		)
+		if (showDeformPaths && state.previewModel != null) {
+			io.github.psd2live.ui.components.DeformPathDialog(state, viewModel) { showDeformPaths = false }
+		}
 	}
 }
 
@@ -168,6 +211,7 @@ fun WorkspaceView(
 private fun HierarchyView(
 	state: PSD2LiveState,
 	viewModel: PSD2LiveViewModel,
+	onRequestOpenDeformPaths: ((String) -> Unit)? = null,
 ) {
 	val colors = LocalToolColors.current
 	val typography = LocalToolTypography.current
@@ -275,6 +319,7 @@ private fun HierarchyView(
 							onRequestSetMeshSettings = { target ->
 								activeMeshSettingsTarget = target
 							},
+							onRequestOpenDeformPaths = onRequestOpenDeformPaths,
 						)
 					}
 				}
@@ -548,6 +593,7 @@ private fun HierarchyTreeList(
 	viewModel: PSD2LiveViewModel,
 	onRequestSetOrder: ((targetId: String, name: String, currentOrder: Float, defaultOrder: Float, isOverridden: Boolean) -> Unit)? = null,
 	onRequestSetMeshSettings: ((MeshSettingsDialogTarget) -> Unit)? = null,
+	onRequestOpenDeformPaths: ((String) -> Unit)? = null,
 ) {
 	val colors = LocalToolColors.current
 	val typography = LocalToolTypography.current
@@ -584,96 +630,6 @@ private fun HierarchyTreeList(
 	val scrollState = rememberScrollState()
 
 	Column(modifier = Modifier.fillMaxSize()) {
-		// Visibility & Deformer Overlay Controls (merged from canvas viewport)
-		Column(
-			modifier = Modifier
-				.fillMaxWidth()
-				.background(colors.panelElevated)
-				.border(BorderStroke(1.dp, colors.divider))
-				.padding(horizontal = 6.dp, vertical = 5.dp),
-			verticalArrangement = Arrangement.spacedBy(4.dp),
-		) {
-			// Row 1: Visibility Channels (Warp, Mesh, Texture)
-			Row(
-				modifier = Modifier.fillMaxWidth(),
-				verticalAlignment = Alignment.CenterVertically,
-				horizontalArrangement = Arrangement.spacedBy(4.dp),
-			) {
-				CompactToggleChip(
-					text = tr("canvas.visibility.warp"),
-					selected = state.showWarp,
-					onToggle = { viewModel.setShowWarp(!state.showWarp) },
-					modifier = Modifier.weight(1f),
-				)
-				CompactToggleChip(
-					text = tr("canvas.visibility.mesh"),
-					selected = state.showMesh,
-					onToggle = { viewModel.setShowMesh(!state.showMesh) },
-					modifier = Modifier.weight(1f),
-				)
-				CompactToggleChip(
-					text = tr("canvas.visibility.texture"),
-					selected = state.showTexture,
-					onToggle = { viewModel.setShowTexture(!state.showTexture) },
-					modifier = Modifier.weight(1f),
-				)
-			}
-
-			// Row 2: Focus & Intelligent Filtering (Selected Only, Dim Unselected, Contextual Warp)
-			Row(
-				modifier = Modifier.fillMaxWidth(),
-				verticalAlignment = Alignment.CenterVertically,
-				horizontalArrangement = Arrangement.spacedBy(4.dp),
-			) {
-				CompactToggleChip(
-					text = tr("canvas.information.selectedOnly"),
-					selected = state.filterSelectedOnly,
-					onToggle = { viewModel.setFilterSelectedOnly(!state.filterSelectedOnly) },
-					modifier = Modifier.weight(1f),
-				)
-				CompactToggleChip(
-					text = tr("canvas.visibility.dimUnselected"),
-					selected = state.dimUnselected,
-					onToggle = { viewModel.setDimUnselected(!state.dimUnselected) },
-					modifier = Modifier.weight(1f),
-				)
-				CompactToggleChip(
-					text = tr("canvas.information.contextualWarp"),
-					selected = state.contextualWarp,
-					onToggle = { viewModel.setContextualWarp(!state.contextualWarp) },
-					modifier = Modifier.weight(1f),
-				)
-			}
-
-			// Row 3: Detail Overlays & Selection Indicators (Names, Indices, Selection Bounds)
-			Row(
-				modifier = Modifier.fillMaxWidth(),
-				verticalAlignment = Alignment.CenterVertically,
-				horizontalArrangement = Arrangement.spacedBy(4.dp),
-			) {
-				CompactToggleChip(
-					text = tr("canvas.information.names"),
-					selected = state.warpShowNames,
-					onToggle = { viewModel.setWarpShowNames(!state.warpShowNames) },
-					enabled = state.showWarp,
-					modifier = Modifier.weight(1f),
-				)
-				CompactToggleChip(
-					text = tr("canvas.information.indices"),
-					selected = state.warpShowIndices,
-					onToggle = { viewModel.setWarpShowIndices(!state.warpShowIndices) },
-					enabled = state.showWarp,
-					modifier = Modifier.weight(1f),
-				)
-				CompactToggleChip(
-					text = tr("canvas.information.selectionBounds"),
-					selected = state.showSelectionBounds,
-					onToggle = { viewModel.setShowSelectionBounds(!state.showSelectionBounds) },
-					modifier = Modifier.weight(1f),
-				)
-			}
-		}
-
 		// Search & Expand/Collapse toolbar
 		Row(
 			modifier = Modifier
@@ -865,6 +821,7 @@ private fun HierarchyTreeList(
 						selectedAncestorDeformerIds = selectedAncestorDeformerIds,
 						onRequestSetOrder = onRequestSetOrder,
 						onRequestSetMeshSettings = onRequestSetMeshSettings,
+						onRequestOpenDeformPaths = onRequestOpenDeformPaths,
 					)
 				}
 				for ((index, drawable) in rootDrawables.withIndex()) {
@@ -883,6 +840,7 @@ private fun HierarchyTreeList(
 						searchQuery = searchQuery,
 						onRequestSetOrder = onRequestSetOrder,
 						onRequestSetMeshSettings = onRequestSetMeshSettings,
+						onRequestOpenDeformPaths = onRequestOpenDeformPaths,
 					)
 				}
 
@@ -983,6 +941,7 @@ private fun DeformerTreeItem(
 	selectedAncestorDeformerIds: Set<String> = emptySet(),
 	onRequestSetOrder: ((targetId: String, name: String, currentOrder: Float, defaultOrder: Float, isOverridden: Boolean) -> Unit)? = null,
 	onRequestSetMeshSettings: ((MeshSettingsDialogTarget) -> Unit)? = null,
+	onRequestOpenDeformPaths: ((String) -> Unit)? = null,
 ) {
 	val colors = LocalToolColors.current
 	val typography = LocalToolTypography.current
@@ -1332,6 +1291,7 @@ private fun DeformerTreeItem(
 				selectedAncestorDeformerIds = selectedAncestorDeformerIds,
 				onRequestSetOrder = onRequestSetOrder,
 				onRequestSetMeshSettings = onRequestSetMeshSettings,
+				onRequestOpenDeformPaths = onRequestOpenDeformPaths,
 			)
 		}
 		for ((dIndex, childDrawable) in childDrawables.withIndex()) {
@@ -1351,6 +1311,7 @@ private fun DeformerTreeItem(
 				searchQuery = searchQuery,
 				onRequestSetOrder = onRequestSetOrder,
 				onRequestSetMeshSettings = onRequestSetMeshSettings,
+				onRequestOpenDeformPaths = onRequestOpenDeformPaths,
 			)
 		}
 	}
@@ -1372,6 +1333,7 @@ private fun DrawableTreeItem(
 	searchQuery: String = "",
 	onRequestSetOrder: ((targetId: String, name: String, currentOrder: Float, defaultOrder: Float, isOverridden: Boolean) -> Unit)? = null,
 	onRequestSetMeshSettings: ((MeshSettingsDialogTarget) -> Unit)? = null,
+	onRequestOpenDeformPaths: ((String) -> Unit)? = null,
 ) {
 	val colors = LocalToolColors.current
 	val typography = LocalToolTypography.current
@@ -1653,6 +1615,18 @@ private fun DrawableTreeItem(
 					)
 				}) {
 					Text(tr("canvas.hierarchy.meshSettings"), style = typography.body.copy(fontSize = 11.sp), color = colors.textPrimary)
+				}
+
+				if (drawable.mesh != null) {
+					DropdownMenuItem(onClick = {
+						showMenu = false
+						onRequestOpenDeformPaths?.invoke(layerId)
+					}) {
+						Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+							IconDeformPath(modifier = Modifier.size(12.dp), tint = colors.accent)
+							Text(tr("path.title"), style = typography.body.copy(fontSize = 11.sp), color = colors.textPrimary)
+						}
+					}
 				}
 
 				if (isMeshOverridden) {

@@ -41,6 +41,17 @@ class AgentTabMcpTest {
                 assertTrue(first.call("project_save", "tab_id" to "a").isError == true)
                 assertFalse(second.call("project_save", "tab_id" to "b", "lease_id" to leaseB).isError == true)
                 assertEquals(0, a.writes); assertEquals(1, b.writes)
+                // Upstream authoring aliases must retain explicit tab routing and old clients.
+                assertEquals("b-1", first.call("inspect", "tab_id" to "b").json().getValue("state").jsonPrimitive.content)
+                assertTrue(first.call("inspect").isError == true)
+                suspend fun revision(lease: String): CallToolResult = first.callTool(CallToolRequest(CallToolRequestParams("revision", buildJsonObject {
+                    put("tab_id", "b"); put("lease_id", lease)
+                    putJsonObject("request") { put("mode", "save") }
+                })))
+                assertTrue(revision(leaseA).isError == true)
+                assertFalse(revision(leaseB).isError == true)
+                assertEquals(0, a.writes); assertEquals(2, b.writes)
+                assertTrue(first.call("path_put", "tab_id" to "b", "lease_id" to leaseA).isError == true)
                 assertFalse(first.call("tab_list").toString().contains(leaseB))
                 assertEquals("c", first.call("tab_create").json().getValue("tab_id").jsonPrimitive.content)
                 first.call("tab_release", "tab_id" to "a", "lease_id" to leaseA)

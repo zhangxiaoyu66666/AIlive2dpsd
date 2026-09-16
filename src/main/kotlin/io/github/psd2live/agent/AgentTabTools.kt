@@ -15,6 +15,14 @@ Do not retry tab_create/tab_claim blindly after an uncertain response: inspect t
 The current/manifest resource lists tabs; use project_get_state(tab_id) for project contents.
 """
 
+internal fun workspaceToolSchema(tabs: AgentWorkspaceTabs?, inputSchema: ToolSchema, toolAnnotations: ToolAnnotations?): ToolSchema = if (tabs == null) inputSchema else inputSchema.copy(
+        properties = JsonObject(inputSchema.properties.orEmpty() + buildJsonObject {
+            putJsonObject("tab_id") { put("type", "string"); put("description", "Explicit target from tab_list/tab_create") }
+            putJsonObject("lease_id") { put("type", "string"); put("description", "Private tab_claim token; required for writes") }
+        }),
+        required = inputSchema.required.orEmpty() + "tab_id" + if (toolAnnotations?.readOnlyHint == true) emptyList() else listOf("lease_id"),
+    )
+
 internal fun Server.addWorkspaceTool(
     tabs: AgentWorkspaceTabs?,
     fallback: AgentWorkspace,
@@ -24,13 +32,7 @@ internal fun Server.addWorkspaceTool(
     toolAnnotations: ToolAnnotations? = null,
     handler: suspend (CallToolRequest, AgentWorkspace) -> CallToolResult,
 ) {
-    val schema = if (tabs == null) inputSchema else inputSchema.copy(
-        properties = JsonObject(inputSchema.properties.orEmpty() + buildJsonObject {
-            putJsonObject("tab_id") { put("type", "string"); put("description", "Explicit target from tab_list/tab_create") }
-            putJsonObject("lease_id") { put("type", "string"); put("description", "Private tab_claim token; required for writes") }
-        }),
-        required = inputSchema.required.orEmpty() + "tab_id" + if (toolAnnotations?.readOnlyHint == true) emptyList() else listOf("lease_id"),
-    )
+    val schema = workspaceToolSchema(tabs, inputSchema, toolAnnotations)
     addTool(name = name, description = description, inputSchema = schema, toolAnnotations = toolAnnotations) { request ->
         if (tabs == null) handler(request, fallback) else tabResult {
             val args = request.arguments.orEmpty()

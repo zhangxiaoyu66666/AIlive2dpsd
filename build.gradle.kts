@@ -11,7 +11,7 @@ plugins {
 }
 
 group = "io.github.psd2live"
-version = "0.6.0"
+version = "0.7.1"
 
 kotlin {
 	jvmToolchain(21)
@@ -92,6 +92,8 @@ distributions {
 			from("README.md")
 			from("README_en.md")
 			from("README_ja.md")
+			from("ROADMAP.md")
+			from("STATUS.md")
 			from("LICENSE")
 			from("THIRD_PARTY_NOTICES.md")
 			from("licenses") { into("licenses") }
@@ -111,17 +113,21 @@ val desktopDistributionRoot = layout.buildDirectory.dir(
 compose.desktop {
 	application {
 		mainClass = "io.github.psd2live.MainKt"
-		jvmArgs += listOf("-Xmx8g", "-Dfile.encoding=UTF-8")
+		jvmArgs += listOf("-Xmx8g", "-Dfile.encoding=UTF-8", "-Dsun.java2d.uiScale.enabled=true")
 		nativeDistributions {
             outputBaseDir.set(desktopDistributionRoot)
             // LWJGL loads sun.misc.Unsafe reflectively; jdeps cannot infer this dependency.
             modules("jdk.unsupported")
+			// ModelDownloader uses java.net.http.HttpClient. Compose's automatic
+			// runtime module scan can miss this API because it is only loaded when
+			// the optional texture-upscale workflow is opened.
+			modules("java.net.http")
 			targetFormats(
 				org.jetbrains.compose.desktop.application.dsl.TargetFormat.Exe,
 				org.jetbrains.compose.desktop.application.dsl.TargetFormat.Msi,
 			)
 			packageName = "PSD2Live"
-			packageVersion = "0.6.0"
+			packageVersion = "0.7.1"
 			description = "PSD2Live - Automated Live2D Rigging Pipeline"
 			copyright = "© 2026 PSD2Live. Licensed under GPL-3.0."
 			vendor = "PSD2Live"
@@ -223,8 +229,8 @@ afterEvaluate {
 }
 
 tasks.test {
-	useJUnitPlatform()
-	systemProperty("psd2live.cubism.smoke", System.getProperty("psd2live.cubism.smoke", "false"))
+    useJUnitPlatform()
+    systemProperty("psd2live.cubism.smoke", System.getProperty("psd2live.cubism.smoke", "false"))
 }
 
 // Opt-in acceptance with local PSD artwork; ordinary tests use synthetic rasters only.

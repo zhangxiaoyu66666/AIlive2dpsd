@@ -1,4 +1,4 @@
-﻿package io.github.psd2live.ui
+package io.github.psd2live.ui
 
 import io.github.psd2live.core.PSD2LivePipeline
 import io.github.psd2live.core.PipelineConfig
@@ -7,8 +7,9 @@ import io.github.psd2live.core.RigPreviewModel
 import io.github.psd2live.core.SemanticTag
 import io.github.psd2live.core.Side
 import io.github.psd2live.i18n.I18n
-import io.github.psd2live.ui.utils.NativeFilePicker
 import io.github.psd2live.i18n.tr
+import io.github.psd2live.ui.utils.DesktopUtils
+import io.github.psd2live.ui.utils.NativeFilePicker
 import java.awt.BorderLayout
 import java.awt.BasicStroke
 import java.awt.Color
@@ -68,6 +69,7 @@ import javax.swing.SpinnerNumberModel
 import javax.swing.SwingWorker
 import javax.swing.Timer
 import javax.swing.table.DefaultTableCellRenderer
+import io.github.psd2live.ui.utils.DesktopDropTarget
 
 class PSD2LiveFrame : JFrame() {
 	private val pipeline = PSD2LivePipeline()
@@ -345,7 +347,7 @@ class PSD2LiveFrame : JFrame() {
 		installLayerTableVisibilityActions()
 		openOutputButton.addActionListener {
 			val directory = outputPathOrNull()
-			if (directory != null && Files.isDirectory(directory) && Desktop.isDesktopSupported()) Desktop.getDesktop().open(directory.toFile())
+			if (directory != null) DesktopUtils.openDirectory(directory)
 		}
 		inputField.addActionListener { analyze() }
 	}
@@ -423,28 +425,32 @@ class PSD2LiveFrame : JFrame() {
 	}
 
 	private fun installDropTarget() {
-		DropTarget(this, DnDConstants.ACTION_COPY, object : DropTargetAdapter() {
-			override fun drop(event: DropTargetDropEvent) {
-				try {
-					event.acceptDrop(DnDConstants.ACTION_COPY)
-					@Suppress("UNCHECKED_CAST")
-					val files = event.transferable.getTransferData(DataFlavor.javaFileListFlavor) as List<File>
-					files.firstOrNull { it.extension.equals("psd", true) }?.let {
-						setInput(it.toPath())
-						analyze()
+		DesktopDropTarget.install(this) { files ->
+			when (val action = DesktopDropTarget.resolveDropAction(files)) {
+				is DesktopDropTarget.DroppedAction.OpenPsd -> {
+					if (action.outputDir != null) {
+						outputField.text = action.outputDir.absolutePath
 					}
-					event.dropComplete(true)
-				} catch (failure: Exception) {
-					event.dropComplete(false)
-					showFailure(failure)
+					setInput(action.file.toPath())
+					analyze()
+				}
+				is DesktopDropTarget.DroppedAction.OpenProject -> {
+					showMessage(tr("dialog.unsupportedDrop", action.file.name))
+				}
+				is DesktopDropTarget.DroppedAction.SetOutputDir -> {
+					outputField.text = action.dir.absolutePath
+				}
+				is DesktopDropTarget.DroppedAction.Unsupported -> {
+					showMessage(action.message)
 				}
 			}
-		}, true)
+		}
 	}
 
 	private fun chooseInput() {
-        NativeFilePicker.choosePsdFile(this, inputField.text)?.let { setInput(Path.of(it)) }
-    }
+		val selected = NativeFilePicker.choosePsdFile(this, inputField.text)
+		if (!selected.isNullOrBlank()) setInput(Path.of(selected))
+	}
 
 	private fun setInput(path: Path) {
 		val normalized = path.toAbsolutePath().normalize()
@@ -454,8 +460,9 @@ class PSD2LiveFrame : JFrame() {
 	}
 
 	private fun chooseOutput() {
-        NativeFilePicker.chooseDirectory(this, outputField.text)?.let { outputField.text = it }
-    }
+		val selected = NativeFilePicker.chooseDirectory(this, outputField.text)
+		if (!selected.isNullOrBlank()) outputField.text = selected
+	}
 
 	private fun analyze() {
 		val input = inputPathOrShowError() ?: return

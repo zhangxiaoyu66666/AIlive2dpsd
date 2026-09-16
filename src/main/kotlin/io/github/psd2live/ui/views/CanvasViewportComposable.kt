@@ -219,7 +219,7 @@ fun CanvasViewportComposable(
 				if (isDragging) {
 					isDragging = false
 					if (event.button == PointerButton.Primary && change != null && (change.position - lastDragPos).getDistance() < 6f) {
-						if (previewModel != null && onLayerClicked != null) {
+						if (state.clickToSelectLayer && previewModel != null && onLayerClicked != null) {
 							val viewport = computeViewport(previewModel, viewSize.width, viewSize.height)
 							val geometry = RigCanvasSupport.evaluate(previewModel, state.parameterValues)
 							val drawableBounds = RigCanvasSupport.boundsByDrawable(geometry)
@@ -317,8 +317,9 @@ fun CanvasViewportComposable(
 			val isDimmingActive = state.dimUnselected && hasActiveSelection
 
 			val nativeFrame = sdkFrame
+			val hasActivePaths = state.showDeformPaths && model.rig.puppet.deformPaths.isNotEmpty()
 			val canUseNativeSdk = mode == WorkspaceTab.PREVIEW &&
-				!showWarp && !showMesh && !informationSelectedOnly && showTexture &&
+				!showWarp && !showMesh && !hasActivePaths && !informationSelectedOnly && showTexture &&
 				!isDimmingActive &&
 				state.hoveredLayerId == null && state.hoveredDeformerId == null &&
 				(!state.showSelectionBounds || !hasActiveSelection) &&
@@ -517,6 +518,52 @@ fun CanvasViewportComposable(
 							hoveredDeformerId = state.hoveredDeformerId,
 							dimUnselected = state.dimUnselected,
 						)
+					}
+
+					// 3e. Deform Paths (RigInformationOverlay)
+					if (state.showDeformPaths && model.rig.puppet.deformPaths.isNotEmpty()) {
+						val selectedLayerDescendants = if (state.selectedDeformerId != null) {
+							descendantLayerIds(model, state.selectedDeformerId, state.parentOverrides)
+						} else {
+							emptySet()
+						}
+						val selectedPathIds = model.rig.puppet.deformPaths.filter { path ->
+							val layerId = model.rig.layerIdByDrawableId[path.drawableId.raw]
+							(state.selectedLayerId != null && layerId == state.selectedLayerId) ||
+								(state.selectedDeformerId != null && layerId != null && layerId in selectedLayerDescendants)
+						}.map { it.id }.toSet()
+
+						val hoveredPathIds = model.rig.puppet.deformPaths.filter { path ->
+							val layerId = model.rig.layerIdByDrawableId[path.drawableId.raw]
+							state.hoveredLayerId != null && layerId == state.hoveredLayerId
+						}.map { it.id }.toSet()
+
+						val pathIds = if (informationSelectedOnly) {
+							selectedPathIds
+						} else {
+							model.rig.puppet.deformPaths.map { it.id }.toSet()
+						}
+
+						val hasSelection = state.selectedLayerId != null || state.selectedDeformerId != null
+
+						if (pathIds.isNotEmpty()) {
+							io.github.psd2live.ui.RigInformationOverlay.paintDeformPaths(
+								g = g,
+								model = model.rig.puppet,
+								geometry = geometry,
+								viewport = viewport,
+								pathIds = pathIds,
+								labels = false,
+								pointIndices = informationIndices,
+								showWidth = state.pathShowWidth,
+								showHardness = state.pathShowHardness,
+								showRadius = state.pathShowRadius,
+								selectedPathIds = selectedPathIds,
+								hoveredPathIds = hoveredPathIds,
+								hasSelection = hasSelection,
+								dimUnselected = state.dimUnselected,
+							)
+						}
 					}
 				} finally {
 					g.dispose()

@@ -22,6 +22,7 @@ internal object WorkspaceStateCodec {
     fun settings(state: PSD2LiveState): JsonObject = buildJsonObject {
         put("rigGenerationVersion", state.rigGenerationVersion)
         put("atlasSize", state.atlasSize)
+        put("textureUpscale", Json.encodeToJsonElement(state.textureUpscale))
         put("meshSpacing", state.meshSpacing)
         put("meshOuterMargin", state.meshOuterMargin)
         put("meshInnerMargin", state.meshInnerMargin)
@@ -85,6 +86,7 @@ internal object WorkspaceStateCodec {
         put("outputPath", state.outputPath)
         put("rigGenerationVersion", state.rigGenerationVersion)
         put("atlasSize", state.atlasSize)
+        put("textureUpscale", Json.encodeToJsonElement(state.textureUpscale))
         put("meshSpacing", state.meshSpacing)
         put("meshOuterMargin", state.meshOuterMargin)
         put("meshInnerMargin", state.meshInnerMargin)
@@ -178,6 +180,7 @@ internal object WorkspaceStateCodec {
         outputPath = value["outputPath"]?.jsonPrimitive?.content ?: base.outputPath,
         rigGenerationVersion = (value["rigGenerationVersion"]?.jsonPrimitive?.int ?: 1).also { require(it in 1..3) { "Unsupported rig generation version: $it" } },
         atlasSize = value["atlasSize"]?.jsonPrimitive?.int ?: base.atlasSize,
+        textureUpscale = value["textureUpscale"]?.let { Json.decodeFromJsonElement<io.github.psd2live.core.TextureUpscaleConfig>(it) } ?: base.textureUpscale,
         meshSpacing = value["meshSpacing"]?.jsonPrimitive?.int ?: base.meshSpacing,
         meshOuterMargin = value["meshOuterMargin"]?.jsonPrimitive?.float ?: base.meshOuterMargin,
         meshInnerMargin = value["meshInnerMargin"]?.jsonPrimitive?.float ?: base.meshInnerMargin,

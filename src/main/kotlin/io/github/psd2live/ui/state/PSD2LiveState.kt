@@ -76,6 +76,8 @@ data class PSD2LiveState(
     val projectSaving: Boolean = false,
     val projectSaveError: String? = null,
     val showProjectLocationDialog: Boolean = false,
+    val showExportPsdDialog: Boolean = false,
+    val isExportingPsd: Boolean = false,
     val projectOpenGeneration: Long = 0,
     val projectEditVersion: Long = 0,
     val projectAuxiliaryVersion: Long = 0,
@@ -101,6 +103,7 @@ data class PSD2LiveState(
 	val outputPath: String = "",
 	val atlasSize: Int = 4096,
 	val rigGenerationVersion: Int = 3,
+	val textureUpscale: io.github.psd2live.core.TextureUpscaleConfig = io.github.psd2live.core.TextureUpscaleConfig(),
 	val meshSpacing: Int = 40,
 	val meshOuterMargin: Float = 1.0f,
 	val meshInnerMargin: Float = 10.0f,
@@ -142,6 +145,7 @@ data class PSD2LiveState(
 	val advancedExpanded: Boolean = false,
 	val isAnalyzing: Boolean = false,
 	val isGenerating: Boolean = false,
+	val isUpscaling: Boolean = false,
 	val progress: Float = 0f,
 	val isIndeterminateProgress: Boolean = false,
 	val statusText: String = "",
@@ -158,14 +162,19 @@ data class PSD2LiveState(
 	val selectedLayerId: String? = null,
 	val selectedDeformerId: String? = null,
 	val showWarp: Boolean = false,
+	val showDeformPaths: Boolean = true,
 	val showMesh: Boolean = false,
 	val showTexture: Boolean = true,
 	val warpShowNames: Boolean = true,
 	val warpShowIndices: Boolean = false,
+	val pathShowWidth: Boolean = false,
+	val pathShowHardness: Boolean = false,
+	val pathShowRadius: Boolean = false,
 	val filterSelectedOnly: Boolean = false,
 	val dimUnselected: Boolean = true,
 	val contextualWarp: Boolean = true,
 	val showSelectionBounds: Boolean = true,
+	val clickToSelectLayer: Boolean = AppSettings.clickToSelectLayer,
 	val hoveredLayerId: String? = null,
 	val hoveredDeformerId: String? = null,
 	val layerVisibility: Map<String, Boolean> = emptyMap(),
@@ -182,6 +191,9 @@ data class PSD2LiveState(
 	val activeWorkspaceTab: WorkspaceTab = WorkspaceTab.PREVIEW,
 	val activeInspectorTab: InspectorTab = InspectorTab.LAYERS,
 	val currentLanguage: AppLanguage = I18n.currentLanguage,
+	val uiScale: Float = AppSettings.uiScale,
+	val fontScale: Float = AppSettings.fontScale,
+	val showSettingsDialog: Boolean = false,
 	val deletedLayerIds: Set<String> = emptySet(),
 	val parentOverrides: Map<String, String?> = emptyMap(),
 	val drawOrderOverrides: Map<String, Float> = emptyMap(),
@@ -196,6 +208,7 @@ data class PSD2LiveState(
 		return PipelineConfig(
             rigGenerationVersion = rigGenerationVersion,
 			atlasSize = atlasSize,
+			textureUpscale = textureUpscale,
 			texturePadding = texturePadding,
 			meshSpacing = meshSpacing,
 			meshOuterMargin = meshOuterMargin,
@@ -299,4 +312,21 @@ data class PSD2LiveState(
 				.filter { isLayerVisible(it.source.id.raw, it.source.visible) && !layerHiddenByDeformer(it.source.id.raw) }
 				.mapTo(linkedSetOf()) { it.source.id.raw }
 		}
+
+	val isBusy: Boolean
+		get() = isAnalyzing || isGenerating || isUpscaling
+
+	fun minRequiredAtlasSize(scale: Int = textureUpscale.scale): Int {
+		val effectiveLayers = previewModel?.analysis?.layers ?: analysis?.layers ?: return 1024
+		val valid = effectiveLayers.filter { it.source.raster.width > 0 && it.source.raster.height > 0 && it.opaquePixels > 0 }
+		if (valid.isEmpty()) return 1024
+		val largest = valid.maxOfOrNull {
+			maxOf(it.source.raster.width * scale, it.source.raster.height * scale) + texturePadding * 2
+		} ?: 1024
+		var size = 256
+		while (size < largest && size < 16384) {
+			size = size shl 1
+		}
+		return size.coerceIn(256, 16384)
+	}
 }

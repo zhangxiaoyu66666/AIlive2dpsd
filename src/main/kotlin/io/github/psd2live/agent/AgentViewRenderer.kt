@@ -31,10 +31,15 @@ object AgentViewRenderer {
 		background: AgentViewBackground,
 		output: AgentViewOutputSpec,
 		annotateDeformerIds: Set<String> = emptySet(),
+		annotatePathIds: Set<String> = emptySet(),
+		annotatePathWidth: Boolean = false,
+		annotatePathHardness: Boolean = false,
+		annotatePathRadius: Boolean = false,
 		pointIndices: Boolean = false,
 	): AgentRenderedView {
 		validateOutput(output)
 		require(annotateDeformerIds.size <= 16) { "Select at most 16 deformers per View" }
+		require(annotatePathIds.size <= 32) { "Select at most 32 deform paths per View" }
 		val knownLayerIds = model.rig.layerIdByDrawableId.values.toSet()
 		val unknownIncluded = includeLayerIds - knownLayerIds
 		require(unknownIncluded.isEmpty()) { "Unknown included layer IDs: ${unknownIncluded.sorted().joinToString()}" }
@@ -61,6 +66,7 @@ object AgentViewRenderer {
 			AgentViewBackground.TRANSPARENT -> BufferedImage(target.width, target.height, BufferedImage.TYPE_INT_ARGB)
 			AgentViewBackground.CHECKERBOARD -> checkerboard(target.width, target.height)
 		}
+		var matchedPathIds = emptyList<String>()
 		val graphics = image.createGraphics()
 		try {
 			graphics.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
@@ -74,6 +80,14 @@ object AgentViewRenderer {
 			paintLayerAnnotations(graphics, model, drawableBounds, target.viewport, annotateLayerIds, image.width, image.height)
 			io.github.psd2live.ui.RigInformationOverlay.paint(graphics, model.rig.puppet, typedParameters,
 				target.viewport, annotateDeformerIds, pointIndices = pointIndices)
+			matchedPathIds = io.github.psd2live.ui.RigInformationOverlay.paintDeformPaths(
+				graphics, model.rig.puppet, geometry,
+				target.viewport, annotatePathIds,
+				pointIndices = pointIndices,
+				showWidth = annotatePathWidth,
+				showHardness = annotatePathHardness,
+				showRadius = annotatePathRadius,
+			)
 		} finally {
 			graphics.dispose()
 		}
@@ -83,7 +97,7 @@ object AgentViewRenderer {
 			output = output,
 			revisionId = revisionId,
 			kind = "model-composite-png",
-			objectIds = (includeLayerIds + annotateLayerIds + annotateDeformerIds).sorted(),
+			objectIds = (includeLayerIds + annotateLayerIds + annotateDeformerIds + matchedPathIds).sorted(),
 			canvasWidth = canvasWidth,
 			canvasHeight = canvasHeight,
 			requestedCanvasRect = resolvedFrame.viewRect,
@@ -95,7 +109,14 @@ object AgentViewRenderer {
 			outOfRangeParameters = outOfRangeParameters,
 			includedLayerIds = includeLayerIds.sorted(),
 			annotatedLayerIds = annotateLayerIds.sorted(),
-		).copy(annotatedDeformerIds = annotateDeformerIds.sorted(), pointIndices = pointIndices)
+		).copy(
+			annotatedDeformerIds = annotateDeformerIds.sorted(),
+			annotatedPathIds = matchedPathIds.sorted(),
+			annotatedPathWidth = annotatePathWidth || annotatePathRadius,
+			annotatedPathHardness = annotatePathHardness || annotatePathRadius,
+			annotatedPathRadius = annotatePathRadius,
+			pointIndices = pointIndices,
+		)
 	}
 
 	fun isolatedLayer(

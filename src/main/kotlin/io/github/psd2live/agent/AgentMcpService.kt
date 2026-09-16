@@ -26,13 +26,10 @@ import io.modelcontextprotocol.kotlin.sdk.server.Server
 import io.modelcontextprotocol.kotlin.sdk.server.ServerOptions
 import io.modelcontextprotocol.kotlin.sdk.server.StreamableHttpServerTransport
 import io.modelcontextprotocol.kotlin.sdk.types.CallToolResult
-import io.modelcontextprotocol.kotlin.sdk.types.GetPromptResult
 import io.modelcontextprotocol.kotlin.sdk.types.ImageContent
 import io.modelcontextprotocol.kotlin.sdk.types.Implementation
 import io.modelcontextprotocol.kotlin.sdk.types.McpJson
-import io.modelcontextprotocol.kotlin.sdk.types.PromptMessage
 import io.modelcontextprotocol.kotlin.sdk.types.ReadResourceResult
-import io.modelcontextprotocol.kotlin.sdk.types.Role
 import io.modelcontextprotocol.kotlin.sdk.types.ServerCapabilities
 import io.modelcontextprotocol.kotlin.sdk.types.TextContent
 import io.modelcontextprotocol.kotlin.sdk.types.TextResourceContents
@@ -247,12 +244,11 @@ private suspend fun createTransport(
 	return transport
 }
 
-internal fun createAgentMcpServer(workspace: AgentWorkspace, tabs: AgentWorkspaceTabs? = null): Server {
+internal fun createAgentMcpServer(workspace: AgentWorkspace, tabs: AgentWorkspaceTabs? = null, legacyTools: Boolean = false): Server {
 	val server = Server(
-		serverInfo = Implementation("psd2live", "0.6.0"),
+		serverInfo = Implementation("psd2live", "0.7.1"),
 		options = ServerOptions(
 			ServerCapabilities(
-				prompts = ServerCapabilities.Prompts(listChanged = false),
 				resources = ServerCapabilities.Resources(subscribe = false, listChanged = false),
 				tools = ServerCapabilities.Tools(listChanged = false),
 			),
@@ -610,12 +606,19 @@ internal fun createAgentMcpServer(workspace: AgentWorkspace, tabs: AgentWorkspac
 		toolAnnotations = READ_ONLY,
 	) { request, workspace ->
 		renderResult {
+			val annotatePathWidth = request.arguments?.get("annotate_path_width")?.jsonPrimitive?.content == "true"
+			val annotatePathHardness = request.arguments?.get("annotate_path_hardness")?.jsonPrimitive?.content == "true"
+			val annotatePathRadius = request.arguments?.get("annotate_path_radius")?.jsonPrimitive?.content == "true"
 			workspace.renderModel(
 				AgentModelViewRequest(
 					parameters = request.floatMap("parameters"),
 					includeLayerIds = request.optionalStringSet("include_layer_ids"),
 					annotateLayerIds = request.optionalStringSet("annotate_layer_ids").orEmpty(),
 					annotateDeformerIds = request.optionalStringSet("annotate_deformer_ids").orEmpty(),
+					annotatePathIds = request.optionalStringSet("annotate_path_ids").orEmpty(),
+					annotatePathWidth = annotatePathWidth || annotatePathRadius,
+					annotatePathHardness = annotatePathHardness || annotatePathRadius,
+					annotatePathRadius = annotatePathRadius,
 					pointIndices = request.arguments?.get("point_indices")?.jsonPrimitive?.content == "true",
 					frame = request.viewFrame(),
 					background = request.background(),
@@ -648,29 +651,43 @@ internal fun createAgentMcpServer(workspace: AgentWorkspace, tabs: AgentWorkspac
 
     server.addWorkspaceTool(tabs, workspace,
         name = "view_render_poses",
-        description = "Render 1..9 parameter poses with one fixed canvas camera and composition. Each image retains its own View mapping. This is static pose sampling, not a physics simulation.",
+        description = "Compare 1..9 poses in one labeled sheet, in input order. parameters are shared; poses override them. target_long_edge/max_bytes bound the entire sheet. Each tile imageRect [x,y,width,height] maps to the shared canvasRect [left,top,right,bottom]; labels are excluded. Static poses, not physics or revision comparison.",
         inputSchema = ToolSchema(properties = JsonObject(requireNotNull(modelViewSchema().properties) + buildJsonObject {
             putJsonObject("poses") { put("type","array"); put("minItems",1); put("maxItems",9)
                 putJsonObject("items") { put("type","object"); putJsonObject("additionalProperties") { put("type","number") } }
             }
+            putJsonObject("columns") { put("type","integer"); put("minimum",1); put("maximum",3); put("description","Row-major columns; omit for a compact grid") }
         }), required = listOf("viewport", "poses")), toolAnnotations = READ_ONLY,
     ) { request, workspace ->
         try {
             val poses = request.arguments!!.getValue("poses").jsonArray
             require(poses.size in 1..9)
+            val columns = request.arguments?.get("columns")?.jsonPrimitive?.int ?: poseSheetColumns(poses.size)
+            require(columns in 1..minOf(3, poses.size)) { "columns must be 1..min(3, pose count)" }
+            val sharedParameters = request.arguments?.get("parameters")?.jsonObject?.mapValues { it.value.jsonPrimitive.float }.orEmpty()
+            val output = request.outputSpec()
+            val rows = (poses.size + columns - 1) / columns
+            val tileOutput = output.copy(targetLongEdge = maxOf(128, output.targetLongEdge / maxOf(columns, rows)))
             val frame=request.viewFrame()
             require(frame is AgentViewFrame.CanvasRect) { "Use canvas_rect for a fixed comparison camera" }
             val revision=workspace.snapshot().revisionId
+            val pathWidth = request.boolean("annotate_path_width", false)
+            val pathHardness = request.boolean("annotate_path_hardness", false)
+            val pathRadius = request.boolean("annotate_path_radius", false)
             val views=poses.map { pose -> workspace.renderModel(AgentModelViewRequest(
-                parameters=pose.jsonObject.mapValues { it.value.jsonPrimitive.float },
+                parameters=sharedParameters + pose.jsonObject.mapValues { it.value.jsonPrimitive.float },
                 includeLayerIds=request.optionalStringSet("include_layer_ids"), frame=frame,
-                background=request.background(), output=request.outputSpec(),
+                background=request.background(), output=tileOutput,
                 annotateLayerIds=request.optionalStringSet("annotate_layer_ids").orEmpty(),
                 annotateDeformerIds=request.optionalStringSet("annotate_deformer_ids").orEmpty(),
+                annotatePathIds=request.optionalStringSet("annotate_path_ids").orEmpty(),
+                annotatePathWidth=pathWidth || pathRadius,
+                annotatePathHardness=pathHardness || pathRadius,
+                annotatePathRadius=pathRadius,
                 pointIndices=request.boolean("point_indices",false))) }
             require(views.all { it.revisionId == revision } && workspace.snapshot().revisionId == revision) { "Workspace changed during comparison; render again" }
-            val metadata=buildJsonObject { put("views",JsonArray(views.map { it.toJson() })); put("physicsSimulated",false) }
-            CallToolResult(content=listOf(TextContent(metadata.toString())) + views.map { ImageContent(Base64.getEncoder().encodeToString(it.png),"image/png") }, structuredContent=metadata)
+            val sheet = renderPoseSheet(views, output, columns)
+            CallToolResult(content=listOf(TextContent(sheet.metadata.toString()), ImageContent(Base64.getEncoder().encodeToString(sheet.images.single()),"image/png")), structuredContent=sheet.metadata)
         } catch(e: IllegalArgumentException) { CallToolResult(content=listOf(TextContent(e.message ?: "Invalid poses")),isError=true) }
           catch(e: IllegalStateException) { CallToolResult(content=listOf(TextContent(e.message ?: "Cannot render poses")),isError=true) }
     }
@@ -780,7 +797,13 @@ internal fun createAgentMcpServer(workspace: AgentWorkspace, tabs: AgentWorkspac
 			}
 			workspace.importPng(
 				AgentPngImportRequest(
-					png = decodePngBase64(request.requiredString("png_base64")),
+					png = request.optionalString("png_path")?.let { path ->
+                        require(request.optionalString("png_base64") == null) { "Provide png_path or png_base64, not both" }
+                        val file = java.nio.file.Path.of(path)
+                        require(file.isAbsolute && java.nio.file.Files.isRegularFile(file)) { "png_path must be an existing absolute file path" }
+                        require(java.nio.file.Files.size(file) in 8..(64L * 1024 * 1024)) { "PNG file exceeds the import budget" }
+                        java.nio.file.Files.readAllBytes(file)
+                    } ?: decodePngBase64(request.requiredString("png_base64")),
 					spatialReferenceId = request.optionalString("spatial_reference_id").orEmpty(),
                     referenceId = request.optionalString("reference_id"),
                     processing = request.arguments?.get("processing") as? JsonObject ?: JsonObject(emptyMap()),
@@ -827,7 +850,7 @@ internal fun createAgentMcpServer(workspace: AgentWorkspace, tabs: AgentWorkspac
 		inputSchema = ToolSchema(
 			properties = buildJsonObject {
 				putJsonObject("layer_id") { put("type", "string"); put("description", "Stable layer ID to remove from the active workspace") }
-				putJsonObject("expected_history_head_node_id") { put("type", "string"); put("description", "Current HEAD from project_get_state or history_list") }
+				putJsonObject("expected_history_head_node_id") { put("type", "string"); put("description", "Current HEAD from inspect or revision") }
 				putJsonObject("task_id") { put("type", "string"); put("description", "Optional long-task correlation ID") }
 			},
 			required = listOf("layer_id", "expected_history_head_node_id"),
@@ -857,15 +880,145 @@ internal fun createAgentMcpServer(workspace: AgentWorkspace, tabs: AgentWorkspac
 		mutationResult { workspace.checkoutHistory(request.requiredString("node_id")).toJson() }
 	}
 
-	server.addPrompt(
-		name = "hair-separation",
-		description = "Natural hair separation: infer local depth, complete crossing root-to-tip locks with a host image editor, assemble candidates early, and judge coherent appearance and intended motion without requiring exact source edges.",
-	) {
-		GetPromptResult(
-			description = "psd2live hair separation skill",
-			messages = listOf(PromptMessage(Role.User, TextContent(loadHairSeparationSkill()))),
-		)
-	}
+    server.addWorkspaceTool(tabs, workspace,
+        name = "path_inspect",
+        description = "Inspect deform paths by mesh target or path ID, returning point positions in mesh coordinates and barycentric bindings.",
+        inputSchema = ToolSchema(
+            properties = buildJsonObject {
+                putJsonObject("target") { put("type", "string"); put("description", "Optional mesh target, e.g. mesh:hair") }
+                putJsonObject("path_id") { put("type", "string"); put("description", "Optional path ID") }
+            },
+        ),
+        toolAnnotations = READ_ONLY,
+    ) { request, workspace ->
+        val puppet = workspace.currentPuppet() ?: error("No model loaded")
+        val json = AgentPathTools.inspect(puppet, request.arguments ?: JsonObject(emptyMap()))
+        jsonResult(json)
+    }
+
+    server.addWorkspaceTool(tabs, workspace,
+        name = "path_preview",
+        description = "Preview mesh vertex displacements caused by moving deform path control points without modifying the project.",
+        inputSchema = ToolSchema(
+            properties = buildJsonObject {
+                putJsonObject("target") { put("type", "string"); put("description", "Mesh target, e.g. mesh:hair") }
+                putJsonObject("path_id") { put("type", "string"); put("description", "ID of the deform path") }
+                putJsonObject("moved_points") { put("type", "array"); put("description", "Array of moved [x, y] coordinates") }
+                putJsonObject("width") { put("type", "number"); put("description", "Optional custom influence width to preview deformation with") }
+                putJsonObject("hardness") { put("type", "number"); put("description", "Optional custom falloff hardness (0..1) to preview deformation with") }
+                putJsonObject("show_width") { put("type", "boolean"); put("description", "Whether to draw the influence width boundary circle in preview image (default: true)") }
+                putJsonObject("show_hardness") { put("type", "boolean"); put("description", "Whether to draw the core hardness circle in preview image (default: true)") }
+                putJsonObject("render") { put("type", "boolean"); put("description", "Whether to render a diagnostic visual preview image (default: true)") }
+            },
+            required = listOf("target", "path_id", "moved_points"),
+        ),
+        toolAnnotations = READ_ONLY,
+    ) { request, workspace ->
+        val puppet = workspace.currentPuppet() ?: error("No model loaded")
+        val json = AgentPathTools.preview(puppet, request.arguments ?: error("Missing arguments"))
+        val previewBase64 = json["previewImage"]?.jsonPrimitive?.contentOrNull
+        if (previewBase64 != null) {
+            CallToolResult(
+                content = listOf(
+                    TextContent(json.toString()),
+                    ImageContent(previewBase64, "image/png"),
+                ),
+                structuredContent = json,
+            )
+        } else {
+            jsonResult(json)
+        }
+    }
+
+    server.addWorkspaceTool(tabs, workspace,
+        name = "path_put",
+        description = "Create or update a deform path on an ArtMesh. Points can be local [x, y] coordinates (automatically bound to triangles) or barycentric objects.",
+        inputSchema = ToolSchema(
+            properties = buildJsonObject {
+                putJsonObject("expected_history_head_node_id") { put("type", "string"); put("description", "Optimistic concurrency state") }
+                putJsonObject("target") { put("type", "string"); put("description", "Mesh target, e.g. mesh:hair") }
+                putJsonObject("id") { put("type", "string"); put("description", "Optional path ID (auto-generated if omitted)") }
+                putJsonObject("points") { put("type", "array"); put("description", "Array of points: [[x,y],...] or [{x, y, corner},...]") }
+                putJsonObject("width") { put("type", "number"); put("description", "Influence width (default 12% of mesh extent)") }
+                putJsonObject("hardness") { put("type", "number"); put("description", "Deformation hardness 0..1 (default 0.5)") }
+                putJsonObject("closed") { put("type", "boolean"); put("description", "Whether path is closed loop (default false)") }
+                putJsonObject("level") { put("type", "integer"); put("description", "Edit level 2 or 3 (default 2)") }
+            },
+            required = listOf("expected_history_head_node_id", "target", "points"),
+        ),
+        toolAnnotations = MUTATING,
+    ) { request, workspace ->
+        mutationResult {
+            val args = request.arguments ?: error("Missing arguments")
+            val puppet = workspace.currentPuppet() ?: error("No model loaded")
+            val (pathId, command) = AgentPathTools.createPutCommand(puppet, args)
+            val state = request.requiredString("expected_history_head_node_id")
+            val res = workspace.authorRig(state, buildJsonArray { add(command) })
+            buildJsonObject {
+                put("historyNodeId", res.historyNodeId)
+                put("revisionId", res.revisionId)
+                put("pathId", pathId)
+                put("target", command.getValue("target"))
+                put("summary", res.summary)
+            }
+        }
+    }
+
+    server.addWorkspaceTool(tabs, workspace,
+        name = "path_delete",
+        description = "Delete a deform path by ID.",
+        inputSchema = ToolSchema(
+            properties = buildJsonObject {
+                putJsonObject("expected_history_head_node_id") { put("type", "string"); put("description", "Optimistic concurrency state") }
+                putJsonObject("path_id") { put("type", "string"); put("description", "ID of the deform path to delete") }
+            },
+            required = listOf("expected_history_head_node_id", "path_id"),
+        ),
+        toolAnnotations = MUTATING,
+    ) { request, workspace ->
+        mutationResult {
+            val args = request.arguments ?: error("Missing arguments")
+            val (pathId, command) = AgentPathTools.createDeleteCommand(args)
+            val state = request.requiredString("expected_history_head_node_id")
+            val res = workspace.authorRig(state, buildJsonArray { add(command) })
+            buildJsonObject {
+                put("historyNodeId", res.historyNodeId)
+                put("revisionId", res.revisionId)
+                put("deletedPathId", pathId)
+                put("summary", res.summary)
+            }
+        }
+    }
+
+    server.addWorkspaceTool(tabs, workspace,
+        name = "path_deform",
+        description = "Deform an ArtMesh by moving deform path control points and baking the result as a keyform at the specified parameter key.",
+        inputSchema = ToolSchema(
+            properties = buildJsonObject {
+                putJsonObject("expected_history_head_node_id") { put("type", "string"); put("description", "Optimistic concurrency state") }
+                putJsonObject("target") { put("type", "string"); put("description", "Mesh target, e.g. mesh:hair") }
+                putJsonObject("path_id") { put("type", "string"); put("description", "ID of the deform path") }
+                putJsonObject("key") { put("type", "object"); put("description", "Destination parameter key coordinate") }
+                putJsonObject("moved_points") { put("type", "array"); put("description", "Array of moved [x, y] coordinates matching path points") }
+            },
+            required = listOf("expected_history_head_node_id", "target", "path_id", "key", "moved_points"),
+        ),
+        toolAnnotations = MUTATING,
+    ) { request, workspace ->
+        mutationResult {
+            val args = request.arguments ?: error("Missing arguments")
+            val command = AgentPathTools.createDeformCommand(args)
+            val state = request.requiredString("expected_history_head_node_id")
+            val res = workspace.authorRig(state, buildJsonArray { add(command) })
+            buildJsonObject {
+                put("historyNodeId", res.historyNodeId)
+                put("revisionId", res.revisionId)
+                put("target", command.getValue("target"))
+                put("key", command.getValue("key"))
+                put("summary", res.summary)
+            }
+        }
+    }
 
 	server.addResource(
 		uri = "psd2live://project/current/manifest",
@@ -878,6 +1031,7 @@ internal fun createAgentMcpServer(workspace: AgentWorkspace, tabs: AgentWorkspac
 		)
 	}
 
+	if (!legacyTools) installAuthoringTools(server, workspace, tabs)
 	return server
 }
 
@@ -898,6 +1052,7 @@ private fun rigObjectCreateSchema(physics: Boolean): ToolSchema = ToolSchema(
 
 private fun pngImportSchema(): ToolSchema = ToolSchema(
 	properties = buildJsonObject {
+        putJsonObject("png_path") { put("type", "string"); put("description", "Absolute local PNG path from the image generator; avoids transferring base64 through model context") }
         putJsonObject("reference_id") { put("type", "string"); put("description", "Reference package from asset_prepare_reference. V2 import keeps raw PNG, removes declared matte, and requires asset_register before adding a layer. Replaces spatial_reference_id.") }
         put("processing", processingSchema())
         putJsonObject("solid_background") { put("type", "string"); put("pattern", "^#[0-9a-fA-F]{6}$"); put("description", "Actual generated matte color. Default generation to pure white #FFFFFF for dark hair or pure black #000000 for light hair to avoid colored fringe; do not guess or automatically strip alpha when omitted. Removes only border-connected near-color pixels, not a baked checkerboard. Inspect remaining matte in composition.") }
@@ -925,7 +1080,7 @@ private fun pngImportSchema(): ToolSchema = ToolSchema(
 			}
 		}
 	},
-	required = listOf("png_base64"),
+	required = emptyList(),
 )
 
 private fun parameterCreateSchema(): ToolSchema = ToolSchema(
@@ -945,7 +1100,7 @@ private fun parameterProperties(includeRequiredValues: Boolean): JsonObject = bu
 	}
 	putJsonObject("expected_history_head_node_id") {
 		put("type", "string")
-		put("description", "Optimistic concurrency boundary returned by project_get_state or history_list")
+		put("description", "Optimistic concurrency boundary returned by inspect or revision")
 	}
 	putJsonObject("name") { put("type", "string") }
 	putJsonObject("min") { put("type", "number"); if (includeRequiredValues) put("default", -1) }
@@ -966,7 +1121,7 @@ private fun addLayerSchema(): ToolSchema = ToolSchema(
 		putJsonObject("asset_id") { put("type", "string") }
 		putJsonObject("expected_history_head_node_id") {
 			put("type", "string")
-			put("description", "Optimistic concurrency boundary returned by project_get_state or history_list")
+			put("description", "Optimistic concurrency boundary returned by inspect or revision")
 		}
 		putJsonObject("name") { put("type", "string") }
 		putJsonObject("layer_id") {
@@ -1092,6 +1247,10 @@ private fun viewSchema(includeBackground: Boolean, includeFocus: Boolean = false
 private fun modelViewSchema(): ToolSchema = ToolSchema(
 	properties = buildJsonObject {
 		putJsonObject("annotate_deformer_ids") { put("type","array"); put("maxItems",16); putJsonObject("items") { put("type","string") };put("description","Warp IDs: posed lattice, name and stable ID; [] is a clean image") }
+		putJsonObject("annotate_path_ids") { put("type","array"); put("maxItems",32); putJsonObject("items") { put("type","string") };put("description","Deform Path IDs to overlay on the mesh (e.g. ['path_1'] or ['*'] for all paths, or ['L2']/['L3']); [] is a clean image") }
+		putJsonObject("annotate_path_width") { put("type","boolean"); put("default",false); put("description","Whether to draw influence width boundaries (outer falloff dashed circle) around deform path control points") }
+		putJsonObject("annotate_path_hardness") { put("type","boolean"); put("default",false); put("description","Whether to draw hardness boundaries (inner core solid circle) around deform path control points") }
+		putJsonObject("annotate_path_radius") { put("type","boolean"); put("default",false); put("description","Legacy alias for enabling both annotate_path_width and annotate_path_hardness") }
 		putJsonObject("point_indices") { put("type","boolean");put("default",false) }
 		putJsonObject("parameters") {
 			put("type", "object")
@@ -1798,6 +1957,10 @@ private fun AgentRenderedView.toJson(): JsonObject = buildJsonObject {
 	putJsonArray("includedLayerIds") { includedLayerIds.forEach { add(JsonPrimitive(it)) } }
 	putJsonArray("annotatedLayerIds") { annotatedLayerIds.forEach { add(JsonPrimitive(it)) } }
 	putJsonArray("annotatedDeformerIds") { annotatedDeformerIds.forEach { add(JsonPrimitive(it)) } }
+	putJsonArray("annotatedPathIds") { annotatedPathIds.forEach { add(JsonPrimitive(it)) } }
+	put("annotatedPathWidth", annotatedPathWidth)
+	put("annotatedPathHardness", annotatedPathHardness)
+	put("annotatedPathRadius", annotatedPathRadius)
 	put("pointIndices",pointIndices)
 	putJsonArray("objectIds") { objectIds.forEach { add(JsonPrimitive(it)) } }
 	putJsonObject("canvasRect") {
@@ -1867,12 +2030,6 @@ private fun AgentRenderedView.toJson(): JsonObject = buildJsonObject {
 	}
 }
 
-private fun loadHairSeparationSkill(): String =
-	AgentMcpService::class.java.getResourceAsStream("/agent/skills/hair-separation.md")
-		?.bufferedReader()
-		?.use { it.readText() }
-		?: error("Bundled hair separation skill is missing")
-
 private val READ_ONLY = ToolAnnotations(
 	readOnlyHint = true,
 	destructiveHint = false,
@@ -1888,9 +2045,9 @@ private val MUTATING = ToolAnnotations(
 )
 
 private val AGENT_INSTRUCTIONS = """
-    PSD2Live edits a recoverable local model workspace. Use stable object IDs; rig_list_objects discovers them, rig_inspect gives compact geometry, and View images retain pixel/canvas mappings.
-    Edits require expected_history_head_node_id. Read project_get_state once, then chain returned heads. On stale heads or uncertain writes, reconcile state/history before retrying. History is append-only. Tasks are optional notes for longer work.
-    Choose tools to match intent: object_edit for names, visibility and hierarchy; rig_transform for shape changes at a parameter pose; keyform tools for channels; asset tools for artwork; physics_put to drive an already-authored shape parameter.
-    agent_get_workflow offers optional, focused knowledge by topic. Artwork may come from original pixels, SVG, painting or an available image generator according to style and user preference; this server imports PNG and does not generate illustrations.
-    Structural validity is not visual quality. Report actual changes and inspected poses; distinguish measured defects, visual judgment and uncertainty. Reuse good candidates and stop unproductive refinement within the user's budget.
+    PSD2Live is a recoverable model editor. Inspect context and relevant objects, understand existing motion ownership, and plan your own work. There are no task recipes or required skills.
+    Chain the returned state after writes. A write updates the model and creates history; it is not an uncommitted preview. Reconcile inspect/revision after uncertain writes. Preserve useful milestones and restore deliberately.
+    Separate source artwork, motion hierarchy, parameter definitions, authored keyforms, and observation poses. Prefer existing owners; add a fitted Warp only for independent motion. All surface points may deform, including empty and boundary cage points. Use broad fields, not isolated mesh vertices.
+    Form/deform edits name exact destination keys; viewing parent parameters does not mean binding them again. Plan endpoints, meaningful combinations and intermediate observations. Keep other keys and channels. Physics drives already-authored output forms.
+    Generate or edit artwork with available host image tools when needed, then import/register it through asset. Compare actual model renders, never generated illustrations as proof of motion. Structural validity and appearance are different. Report only observed results and remaining limitations.
 """.trimIndent()

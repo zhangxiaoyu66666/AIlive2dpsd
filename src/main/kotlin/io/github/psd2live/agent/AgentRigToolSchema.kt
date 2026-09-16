@@ -55,9 +55,6 @@ internal fun rigGeometrySchema(edit: Boolean): ToolSchema = ToolSchema(
     }, required=if(edit)listOf("target","coordinate","operations","expected_history_head_node_id") else listOf("target"),
 )
 
-internal fun loadRigGeometryWorkflow(): String = requireNotNull(AgentWorkspace::class.java.classLoader.getResourceAsStream("agent/skills/rig-geometry.md"))
-    .bufferedReader().use { it.readText() }
-
 private fun geometrySelectionSchema(): JsonObject = buildJsonObject {
                             put("type","object");put("additionalProperties",false)
                             putJsonObject("properties") {

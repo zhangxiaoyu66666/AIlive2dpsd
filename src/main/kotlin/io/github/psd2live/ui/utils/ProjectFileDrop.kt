@@ -30,17 +30,19 @@ internal object ProjectFileDrop {
 /** Bind to the Compose content, whose native child surface receives drops, not the outer JFrame. */
 @Composable
 @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
-internal fun Modifier.projectFileDrop(onOpen: (Path) -> Unit, onError: (String) -> Unit): Modifier {
+internal fun Modifier.projectFileDrop(onOpen: (Path) -> Unit, onError: (String) -> Unit, onDragStateChanged: (Boolean) -> Unit = {}): Modifier {
     val open by rememberUpdatedState(onOpen)
     val error by rememberUpdatedState(onError)
+    val dragStateChanged by rememberUpdatedState(onDragStateChanged)
     var hovering by remember { mutableStateOf(false) }
     val target = remember {
         object : DragAndDropTarget {
-            override fun onEntered(event: DragAndDropEvent) { hovering = true }
-            override fun onExited(event: DragAndDropEvent) { hovering = false }
-            override fun onEnded(event: DragAndDropEvent) { hovering = false }
+            override fun onEntered(event: DragAndDropEvent) { hovering = true; dragStateChanged(true) }
+            override fun onExited(event: DragAndDropEvent) { hovering = false; dragStateChanged(false) }
+            override fun onEnded(event: DragAndDropEvent) { hovering = false; dragStateChanged(false) }
             override fun onDrop(event: DragAndDropEvent): Boolean {
                 hovering = false
+                dragStateChanged(false)
                 return try {
                     val paths = ProjectFileDrop.read(event.awtTransferable)
                     if (paths.isEmpty()) { error(tr("drop.unsupported")); false }

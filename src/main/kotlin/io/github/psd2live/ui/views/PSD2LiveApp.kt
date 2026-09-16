@@ -70,9 +70,20 @@ import io.github.psd2live.ui.components.CompactButton
 import io.github.psd2live.ui.components.CompactIconButton
 import io.github.psd2live.ui.components.IconClose
 import io.github.psd2live.ui.components.ImageLightboxDialog
+import io.github.psd2live.ui.components.ExportPsdDialog
+import io.github.psd2live.ui.components.HelpDialog
+import io.github.psd2live.ui.components.HelpTab
+import io.github.psd2live.ui.components.TextureUpscaleDialog
 import io.github.psd2live.ui.state.PSD2LiveState
 import io.github.psd2live.ui.state.PSD2LiveViewModel
 import io.github.psd2live.ui.state.WorkspaceTab
+import androidx.compose.material.DropdownMenu
+import androidx.compose.material.DropdownMenuItem
+import androidx.compose.material.Divider
+import io.github.psd2live.ui.components.SettingsDialog
+import io.github.psd2live.ui.state.AppSettings
+import io.github.psd2live.ui.utils.DesktopUtils
+import kotlin.math.roundToInt
 import io.github.psd2live.ui.theme.CompactToolTheme
 import io.github.psd2live.ui.theme.LocalToolColors
 import io.github.psd2live.ui.theme.LocalToolTypography
@@ -106,7 +117,7 @@ fun FrameWindowScope.PSD2LiveApp(
 	},
 ) {
 	val state by viewModel.state.collectAsState()
-	var showAboutDialog by remember { mutableStateOf(false) }
+	var helpDialogTab by remember { mutableStateOf<HelpTab?>(null) }
 	var showAgentDialog by remember { mutableStateOf(false) }
     val openInputPath: (Path) -> Unit = { path ->
         if (onOpenPath != null) onOpenPath(path)
@@ -115,6 +126,8 @@ fun FrameWindowScope.PSD2LiveApp(
             viewModel.setInputPath(path.toString()); viewModel.setWorkspaceTab(WorkspaceTab.PREVIEW); viewModel.analyze()
         }
     }
+	var showUpscaleDialog by remember { mutableStateOf(false) }
+    var isDraggingOver by remember { mutableStateOf(false) }
 
 	viewModel.confirmUnsavedChanges = {
         JOptionPane.showOptionDialog(window, tr("project.unsaved"), tr("project.save"), JOptionPane.DEFAULT_OPTION,
@@ -125,11 +138,14 @@ fun FrameWindowScope.PSD2LiveApp(
 	val currentLanguage = state.currentLanguage
 
 
-	CompactToolTheme {
+	CompactToolTheme(
+		uiScale = state.uiScale,
+		fontScale = state.fontScale,
+	) {
 		val colors = LocalToolColors.current
 		val typography = LocalToolTypography.current
 
-		val isBusy = state.isAnalyzing || state.isGenerating
+		val isBusy = state.isBusy
 		val hasInput = state.inputPath.isNotBlank()
 		val hasOutput = state.outputPath.isNotBlank()
 		val canGenerate = hasInput && (state.exportCmo3 || state.exportMoc3) && !isBusy
@@ -160,9 +176,11 @@ fun FrameWindowScope.PSD2LiveApp(
 		}
 
 		val chooseOutputFolder = {
-			val selected = NativeFilePicker.chooseDirectory(window, state.outputPath)
-			if (!selected.isNullOrBlank()) {
-				viewModel.setOutputPath(selected)
+			if (!isBusy) {
+				val selected = NativeFilePicker.chooseDirectory(window, state.outputPath)
+				if (!selected.isNullOrBlank()) {
+					viewModel.setOutputPath(selected)
+				}
 			}
 		}
 
@@ -176,9 +194,11 @@ fun FrameWindowScope.PSD2LiveApp(
 		}
 
 		val onOpenProjectAction: () -> Unit = {
-			val selected = NativeFilePicker.chooseProjectFile(window, state.projectFile)
-			if (!selected.isNullOrBlank()) {
-				openInputPath(Path.of(selected))
+			if (!isBusy) {
+				val selected = NativeFilePicker.chooseProjectFile(window, state.projectFile)
+				if (!selected.isNullOrBlank()) {
+					openInputPath(Path.of(selected))
+				}
 			}
 		}
         val onReanalyzeAction = {
@@ -196,41 +216,75 @@ fun FrameWindowScope.PSD2LiveApp(
 		Box(
 			modifier = Modifier
 				.fillMaxSize()
-                .projectFileDrop(onOpen = onDropPath ?: openInputPath, onError = { message ->
+                .projectFileDrop(onOpen = onDropPath ?: openInputPath, onDragStateChanged = { isDraggingOver = it }, onError = { message ->
                     viewModel.addLog(message)
                     JOptionPane.showMessageDialog(window, message, tr("app.title"), JOptionPane.WARNING_MESSAGE)
                 })
 				.border(BorderStroke(1.dp, colors.border))
 				.onPreviewKeyEvent { event ->
-					if (event.type == KeyEventType.KeyDown && event.isCtrlPressed) {
-						when (event.key) {
-                            Key.N -> { onNewTab?.invoke(); onNewTab != null }
-                            Key.W -> { onCloseTab?.invoke(); onCloseTab != null }
-							Key.O -> {
-                                if (event.isShiftPressed) onOpenPsdAction() else onOpenProjectAction()
-								true
-							}
-							Key.S -> {
-                                if (event.isAltPressed) { if (canSaveAll) onSaveAll?.invoke() }
-                                else viewModel.requestProjectSave(event.isShiftPressed)
-                                true
-                            }
-                            Key.Z -> { if (event.isShiftPressed) viewModel.redoHistory() else viewModel.undoHistory(); true }
-                            Key.Y -> { viewModel.redoHistory(); true }
-                            Key.R -> {
-								onReanalyzeAction()
-								true
-							}
-							Key.G -> {
-								if (event.isShiftPressed) {
-									triggerExportTo()
-								} else {
-									onGenerateAction()
-								}
-								true
-							}
-							else -> false
+					if (event.type == KeyEventType.KeyDown) {
+						if (event.key == Key.F1) {
+							helpDialogTab = HelpTab.QUICK_START
+							return@onPreviewKeyEvent true
 						}
+						if (event.isCtrlPressed) {
+							when (event.key) {
+								Key.Plus, Key.Equals, Key.NumPadAdd -> {
+									viewModel.zoomIn()
+									true
+								}
+								Key.Minus, Key.NumPadSubtract -> {
+									viewModel.zoomOut()
+									true
+								}
+								Key.Zero, Key.NumPad0 -> {
+									viewModel.resetZoom()
+									true
+								}
+								Key.Comma -> {
+									viewModel.openSettingsDialog()
+									true
+								}
+								Key.O -> {
+									if (event.isShiftPressed) onOpenPsdAction() else onOpenProjectAction()
+									true
+								}
+								Key.N -> { onNewTab?.invoke(); onNewTab != null }
+                                Key.W -> { onCloseTab?.invoke(); onCloseTab != null }
+                                Key.S -> {
+                                    if (event.isAltPressed) { if (canSaveAll) onSaveAll?.invoke() }
+                                    else viewModel.requestProjectSave(event.isShiftPressed)
+                                    true
+                                }
+								Key.Z -> { if (event.isShiftPressed) viewModel.redoHistory() else viewModel.undoHistory(); true }
+								Key.Y -> { viewModel.redoHistory(); true }
+								Key.R -> {
+									onReanalyzeAction()
+									true
+								}
+								Key.E -> {
+									if (event.isShiftPressed && hasInput && !isBusy) {
+										viewModel.openExportPsdDialog()
+										true
+									} else false
+								}
+								Key.U -> {
+									if (hasInput && !isBusy) {
+										showUpscaleDialog = true
+									}
+									true
+								}
+								Key.G -> {
+									if (event.isShiftPressed) {
+										triggerExportTo()
+									} else {
+										onGenerateAction()
+									}
+									true
+								}
+								else -> false
+							}
+						} else false
 					} else false
 				},
 		) {
@@ -249,6 +303,8 @@ fun FrameWindowScope.PSD2LiveApp(
 						canOpenOutput = canOpenOutput,
 						canGenerate = canGenerate,
 						currentLanguage = currentLanguage,
+						uiScale = state.uiScale,
+						fontScale = state.fontScale,
 						onOpenPsd = onOpenPsdAction,
                         onOpenProject = onOpenProjectAction,
                         onSaveProject = { viewModel.requestProjectSave() },
@@ -257,14 +313,52 @@ fun FrameWindowScope.PSD2LiveApp(
                         canSaveAll = canSaveAll,
                         projectTitle = (state.projectFile ?: tr("project.untitled")) + if (state.projectDirty) " *" else "",
 						onReanalyze = onReanalyzeAction,
+						onReexportPsd = { if (hasInput && !isBusy) viewModel.openExportPsdDialog() },
 						onOpenOutput = { openFolder(state.outputPath) },
 						onGenerate = onGenerateAction,
 						onExportTo = triggerExportTo,
 						onClose = onCloseRequest,
 						onSetLanguage = { viewModel.setLanguage(it) },
+						onZoomIn = { viewModel.zoomIn() },
+						onZoomOut = { viewModel.zoomOut() },
+						onResetZoom = { viewModel.resetZoom() },
+						onSetUiScale = { viewModel.setUiScale(it) },
+						onSetFontScale = { viewModel.setFontScale(it) },
+						clickToSelectLayer = state.clickToSelectLayer,
+						showTexture = state.showTexture,
+						showMesh = state.showMesh,
+						showWarp = state.showWarp,
+						showDeformPaths = state.showDeformPaths,
+						pathShowWidth = state.pathShowWidth,
+						pathShowHardness = state.pathShowHardness,
+						pathShowRadius = state.pathShowRadius,
+						contextualWarp = state.contextualWarp,
+						filterSelectedOnly = state.filterSelectedOnly,
+						dimUnselected = state.dimUnselected,
+						showSelectionBounds = state.showSelectionBounds,
+						warpShowNames = state.warpShowNames,
+						warpShowIndices = state.warpShowIndices,
+						onToggleClickToSelectLayer = { viewModel.setClickToSelectLayer(!state.clickToSelectLayer) },
+						onToggleShowTexture = { viewModel.setShowTexture(!state.showTexture) },
+						onToggleShowMesh = { viewModel.setShowMesh(!state.showMesh) },
+						onToggleShowWarp = { viewModel.setShowWarp(!state.showWarp) },
+						onToggleShowDeformPaths = { viewModel.setShowDeformPaths(!state.showDeformPaths) },
+						onTogglePathShowWidth = { viewModel.setPathShowWidth(!state.pathShowWidth) },
+						onTogglePathShowHardness = { viewModel.setPathShowHardness(!state.pathShowHardness) },
+						onTogglePathShowRadius = { viewModel.setPathShowRadius(!state.pathShowRadius) },
+						onToggleContextualWarp = { viewModel.setContextualWarp(!state.contextualWarp) },
+						onToggleFilterSelectedOnly = { viewModel.setFilterSelectedOnly(!state.filterSelectedOnly) },
+						onToggleDimUnselected = { viewModel.setDimUnselected(!state.dimUnselected) },
+						onToggleShowSelectionBounds = { viewModel.setShowSelectionBounds(!state.showSelectionBounds) },
+						onToggleWarpShowNames = { viewModel.setWarpShowNames(!state.warpShowNames) },
+						onToggleWarpShowIndices = { viewModel.setWarpShowIndices(!state.warpShowIndices) },
+						onShowSettings = { viewModel.openSettingsDialog() },
 						onShowAgentConnection = { showAgentDialog = true },
+						onShowTextureUpscale = { showUpscaleDialog = true },
 						onShowHistory = { viewModel.setWorkspaceTab(WorkspaceTab.HISTORY) },
-						onShowAbout = { showAboutDialog = true },
+						onShowAbout = { helpDialogTab = HelpTab.ABOUT },
+						onShowHelp = { tab -> helpDialogTab = tab },
+						onOpenUrl = { url -> DesktopUtils.openBrowser(url) },
 					)
 				}
 				projectTabs()
@@ -346,7 +440,7 @@ fun FrameWindowScope.PSD2LiveApp(
 				}
 
 				// Bottom Status Bar
-				StatusBar(state)
+				StatusBar(state, viewModel)
 			}
 
 			// Floating Non-blocking Success Toast
@@ -373,13 +467,12 @@ fun FrameWindowScope.PSD2LiveApp(
 			)
 		}
 
-		// About Dialog
-		if (showAboutDialog) {
-			ModalDialog(
-				title = tr("dialog.about.title"),
-				message = tr("dialog.about.message"),
-				onDismiss = { showAboutDialog = false },
-				isError = false,
+		// Help & About Dialog
+		helpDialogTab?.let { tab ->
+			HelpDialog(
+				initialTab = tab,
+				onDismiss = { helpDialogTab = null },
+				onOpenUrl = { url -> DesktopUtils.openBrowser(url) },
 			)
 		}
 
@@ -391,6 +484,18 @@ fun FrameWindowScope.PSD2LiveApp(
 			)
 		}
 
+		if (showUpscaleDialog) {
+			TextureUpscaleDialog(
+				config = state.textureUpscale,
+				isBusy = isBusy,
+				isUpscaling = state.isUpscaling,
+				progress = state.progress,
+				statusText = state.statusText,
+				onDismiss = { showUpscaleDialog = false },
+				onApply = viewModel::setTextureUpscale,
+			)
+		}
+
 		state.lightboxImage?.let { imgBytes ->
 			ImageLightboxDialog(
 				imageBytes = imgBytes,
@@ -399,7 +504,8 @@ fun FrameWindowScope.PSD2LiveApp(
 			)
 		}
 
-		io.github.psd2live.ui.components.ProjectLocationDialog(state, viewModel)
+		io.github.psd2live.ui.components.ProjectLocationDialog(state, viewModel, window)
+		ExportPsdDialog(state, viewModel, window)
 
 		if (!state.showProjectLocationDialog && state.projectSaveError != null) {
 			ModalDialog(
@@ -410,23 +516,69 @@ fun FrameWindowScope.PSD2LiveApp(
 				confirmText = tr("dialog.ok"),
 			)
 		}
+
+		if (state.showSettingsDialog) {
+			SettingsDialog(
+				uiScale = state.uiScale,
+				fontScale = state.fontScale,
+				clickToSelectLayer = state.clickToSelectLayer,
+				onUiScaleChange = viewModel::setUiScale,
+				onFontScaleChange = viewModel::setFontScale,
+				onClickToSelectLayerChange = viewModel::setClickToSelectLayer,
+				onResetDefaults = {
+					AppSettings.resetToDefaults()
+					viewModel.resetZoom()
+				},
+				onDismiss = { viewModel.closeSettingsDialog() },
+			)
+		}
+
+		if (isDraggingOver) {
+			Box(
+				modifier = Modifier
+					.fillMaxSize()
+					.background(Color.Black.copy(alpha = 0.65f))
+					.padding(24.dp)
+					.border(2.dp, colors.accent, RoundedCornerShape(12.dp)),
+				contentAlignment = Alignment.Center,
+			) {
+				Column(
+					horizontalAlignment = Alignment.CenterHorizontally,
+					verticalArrangement = Arrangement.spacedBy(10.dp),
+				) {
+					Text(
+						text = tr("drop.overlay.title"),
+						style = typography.title.copy(fontSize = 20.sp, fontWeight = FontWeight.Bold),
+						color = Color.White,
+					)
+					Text(
+						text = tr("drop.overlay.desc"),
+						style = typography.body.copy(fontSize = 13.sp),
+						color = Color.White.copy(alpha = 0.85f),
+					)
+				}
+			}
+		}
 	}
 }
 
 @Composable
-private fun StatusBar(state: PSD2LiveState) {
+private fun StatusBar(
+	state: PSD2LiveState,
+	viewModel: PSD2LiveViewModel,
+	modifier: Modifier = Modifier,
+) {
 	val colors = LocalToolColors.current
 	val typography = LocalToolTypography.current
 
 	Row(
-		modifier = Modifier
+		modifier = modifier
 			.fillMaxWidth()
 			.height(24.dp)
 			.background(colors.panelElevated)
 			.border(BorderStroke(1.dp, colors.divider))
 			.padding(horizontal = 8.dp),
 		verticalAlignment = Alignment.CenterVertically,
-		horizontalArrangement = Arrangement.SpaceBetween,
 	) {
 		Text(
 			text = state.statusText.ifBlank { tr("status.ready") },
@@ -437,7 +589,7 @@ private fun StatusBar(state: PSD2LiveState) {
 			modifier = Modifier.weight(1f),
 		)
 
-		if (state.isAnalyzing || state.isGenerating) {
+		if (state.isBusy) {
 			Spacer(Modifier.width(12.dp))
 			Row(
 				verticalAlignment = Alignment.CenterVertically,
@@ -461,6 +613,64 @@ private fun StatusBar(state: PSD2LiveState) {
 						color = colors.accent,
 						backgroundColor = colors.controlBackground,
 					)
+				}
+			}
+		}
+
+		Spacer(Modifier.width(10.dp))
+
+		// Quick UI scale indicator & menu
+		Box {
+			var showZoomMenu by remember { mutableStateOf(false) }
+			val pct = (state.uiScale * 100).roundToInt()
+			Row(
+				modifier = Modifier
+					.background(colors.controlBackground.copy(alpha = 0.65f), RoundedCornerShape(3.dp))
+					.border(BorderStroke(0.5.dp, colors.border), RoundedCornerShape(3.dp))
+					.clickable { showZoomMenu = true }
+					.pointerHoverIcon(PointerIcon(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)))
+					.padding(horizontal = 6.dp, vertical = 2.dp),
+				verticalAlignment = Alignment.CenterVertically,
+				horizontalArrangement = Arrangement.spacedBy(4.dp),
+			) {
+				Text(
+					text = "$pct%",
+					style = typography.monoSmall.copy(fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold),
+					color = colors.textPrimary,
+				)
+			}
+
+			DropdownMenu(
+				expanded = showZoomMenu,
+				onDismissRequest = { showZoomMenu = false },
+			) {
+				DropdownMenuItem(onClick = { showZoomMenu = false; viewModel.zoomIn() }) {
+					Text(tr("menu.view.zoomIn") + " (Ctrl+=)", style = typography.body.copy(fontSize = 11.5.sp))
+				}
+				DropdownMenuItem(onClick = { showZoomMenu = false; viewModel.zoomOut() }) {
+					Text(tr("menu.view.zoomOut") + " (Ctrl+-)", style = typography.body.copy(fontSize = 11.5.sp))
+				}
+				DropdownMenuItem(onClick = { showZoomMenu = false; viewModel.resetZoom() }) {
+					Text(tr("menu.view.zoomReset") + " (Ctrl+0)", style = typography.body.copy(fontSize = 11.5.sp))
+				}
+				Divider(color = colors.divider, thickness = 1.dp)
+				listOf(1.0f, 1.15f, 1.25f, 1.35f, 1.50f, 1.75f, 2.00f, 2.50f).forEach { scale ->
+					val p = (scale * 100).toInt()
+					val isCurrent = kotlin.math.abs(state.uiScale - scale) < 0.03f
+					DropdownMenuItem(onClick = { showZoomMenu = false; viewModel.setUiScale(scale) }) {
+						Text(
+							(if (isCurrent) "✓ " else "   ") + "$p%",
+							style = typography.body.copy(
+								fontSize = 11.5.sp,
+								color = if (isCurrent) colors.accent else colors.textPrimary,
+								fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal,
+							)
+						)
+					}
+				}
+				Divider(color = colors.divider, thickness = 1.dp)
+				DropdownMenuItem(onClick = { showZoomMenu = false; viewModel.openSettingsDialog() }) {
+					Text(tr("dialog.settings.title") + "… (Ctrl+,)", style = typography.body.copy(fontSize = 11.5.sp))
 				}
 			}
 		}
@@ -542,27 +752,11 @@ private fun ModalDialog(
 }
 
 private fun openFolder(pathString: String) {
-	val raw = pathString.trim()
-	if (raw.isEmpty()) return
-	try {
-		val dir = Path.of(raw)
-		if (Files.isDirectory(dir)) {
-			if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.OPEN)) {
-				Desktop.getDesktop().open(dir.toFile())
-			} else {
-				val os = System.getProperty("os.name").orEmpty().lowercase()
-				when {
-					os.contains("win") -> ProcessBuilder("explorer.exe", dir.toAbsolutePath().toString()).start()
-					os.contains("mac") -> ProcessBuilder("open", dir.toAbsolutePath().toString()).start()
-					else -> ProcessBuilder("xdg-open", dir.toAbsolutePath().toString()).start()
-				}
-			}
-		}
-	} catch (_: Exception) {}
+	DesktopUtils.openDirectory(pathString)
 }
 
 private fun copyToClipboard(text: String) {
-	Toolkit.getDefaultToolkit().systemClipboard.setContents(StringSelection(text), null)
+	DesktopUtils.copyToClipboard(text)
 }
 
 @Composable
