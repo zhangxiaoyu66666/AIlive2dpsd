@@ -1,6 +1,10 @@
 # Third-party Notices
 
-PSD2Live is licensed under GNU GPL version 3. See `LICENSE`.
+AIlive2dpsd is licensed under GNU GPL version 3. See `LICENSE`.
+
+## PSD2Live upstream
+
+AIlive2dpsd is a fork maintained by [zhangxiaoyu66666](https://github.com/zhangxiaoyu66666/AIlive2dpsd), based on [PSD2Live](https://github.com/tsunehimatoi/psd2live) by tsunehimatoi and contributors. Original copyright and license notices remain applicable. This fork adds multi-project workflows, save-all behavior, source-workflow integration and compatible MCP routing.
 
 ## Umamo
 

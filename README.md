@@ -1,17 +1,40 @@
-# PSD2Live
+# AIlive2dpsd
 
 [English](README_en.md) | [日本語](README_ja.md)
 
-PSD2Live 是一个自动化的 Live2D 模型生成流水线与桌面应用。输入分层 PSD 文件，系统自动完成图层语义识别、连通域双侧拆分、自适应三角网格剖分、九轴面部经纬网与解耦变形器层级构建、头发多摆物理与果冻眼动力学模拟及循环待机动作生成，一键导出可编辑的 `.cmo3` 编辑器工程与运行时 `.moc3` 文件族。
+由 [zhangxiaoyu66666](https://github.com/zhangxiaoyu66666) 维护，基于 [tsunehimatoi/PSD2Live](https://github.com/tsunehimatoi/psd2live) 开发，继续采用 GPL-3.0。此仓库保留上游建模与导出能力，并加入下面的桌面工作流扩展。
+
+AIlive2dpsd 是一个自动化的 Live2D 模型生成流水线与桌面应用。输入分层 PSD 文件，系统自动完成图层语义识别、连通域双侧拆分、自适应三角网格剖分、九轴面部经纬网与解耦变形器层级构建、头发多摆物理与果冻眼动力学模拟及循环待机动作生成，一键导出可编辑的 `.cmo3` 编辑器工程与运行时 `.moc3` 文件族。
 
 > [!IMPORTANT]
-> **想直接使用桌面程序？** Windows 10/11 x64 用户请前往 [Releases](https://github.com/tsunehimatoi/psd2live/releases/latest) 下载可执行程序。便携版 ZIP 解压即用，也可选择 EXE 或 MSI 安装包；这些发布包已包含 Java 运行时，无需配置源码构建环境。
+> **使用本分支桌面程序：** 发布包请查看 [AIlive2dpsd Releases](https://github.com/zhangxiaoyu66666/AIlive2dpsd/releases)。尚无发布包时，可按下方说明从源码运行，或用 `./gradlew.bat createDistributable` 构建带 Java 运行时的 Windows 应用。上游 PSD2Live 发布包不包含本分支新增功能。
 
 <p align="center">
-  <img src="docs/imgs/use.gif" alt="PSD2Live 操作演示" />
+  <img src="docs/imgs/use.gif" alt="AIlive2dpsd 操作演示" />
   <br>
   <em>端到端全自动建模、实时视线追踪与动态预览</em>
 </p>
+
+---
+
+## 本分支新增功能
+
+| 功能 | 使用方式与行为 |
+| :--- | :--- |
+| **多工程标签** | 同时打开多个工程，各自保留参数、撤销历史和预览状态；标签支持滚轮、滚动条与自动定位。`Ctrl+N` 新建，`Ctrl+W` 关闭当前标签。 |
+| **全部保存** | 文件菜单 → 全部保存，或 `Ctrl+Alt+S`。已有路径直接写入；首次保存依次选择位置；跳过空白及无修改的已保存工程。 |
+| **关闭前统一保存** | 退出时统一选择“全部保存并关闭 / 全部不保存 / 取消”。取消选址、写入失败或保存中又有修改时，保留所有工程标签。 |
+| **默认预览与安全打开** | 启动、新建标签和导入 PSD 默认进入预览。菜单打开文件使用新标签；拖入单个文件在当前标签打开，加载成功才替换，失败保留原工程。 |
+| **See-Through 制作页面** | 手动切换到 ST API 页面，连接本地 See-Through 服务，上传图片、查看拆图进度、继续获取结果、导出 PSD，再导入编辑；记录确认版与实际导入版。需要单独运行 See-Through 服务。 |
+| **多工程 MCP** | 每个工程通过 `tab_id` 定位，写操作还需 `lease_id`；原工具接口与上游新增创作接口并存，切换可见标签不会改变工具目标。 |
+| **眼部与网格修复** | 保留软边及细小睫毛轮廓，改善闭眼残片与眉毛层级；网格重建遇到已有手工顶点关键帧或胶水时停止，保护已有绑定。详见[眼部与网格可靠性](docs/eye-rig-reliability.md)。 |
+| **预览与原生文件选择** | Skia 预览复用纹理并批量绘制网格；Windows 使用原生打开、保存和目录选择器，取消后不会再弹第二个选择框。 |
+
+本分支也已合并上游的变形路径编辑、纹理高清化、PSD 重导出、界面缩放与设置等更新。变形路径效果和完整自动建模质量仍需结合实际模型验收。
+
+操作细节见[多工程与 MCP](docs/project-tabs.md)、[See-Through 流程](docs/source-workflow.md)、[预览性能](docs/preview-performance.md)。`.psd2live` 工程格式、现有 MCP 配置名称与 `PSD2LIVE_MCP_TOKEN` 保持兼容。
+
+2026-09-16：合并版本通过 211 项自动测试及打包运行时检查；这些检查不替代原生窗口、Cubism Editor 或真实模型效果验收。
 
 ---
 
@@ -29,7 +52,7 @@ PSD2Live 是一个自动化的 Live2D 模型生成流水线与桌面应用。输
 | 规范 | [工程文件格式](docs/zh/spec/PROJECT_FORMAT.md) | `.psd2live` 归档条目、保存/恢复语义与校验规则（完整规范为[英文版](docs/en/spec/PROJECT_FORMAT.md)） |
 | 规范 | [实现对比与设计决策](docs/zh/spec/IMPLEMENTATION_COMPARISON.md) | 逐流程技术选型、格式不变性与自动化几何自检说明 |
 | 规范 | [运行时、编辑与导出结构及功能缺口](docs/zh/spec/RUNTIME_EXPORT_ARCHITECTURE_AND_GAPS.md) | `PuppetModel`、工程历史、CMO3/MOC3/边车接口关系，透传与完整支持的区别及缺口优先级 |
-| Agent | [MCP 接口契约](docs/zh/agent/MCP_AUTHORING.md) | 当前对外暴露的 10 个合并工具及其分支契约、素材导入、姿态拼图与失败条件 |
+| Agent | [MCP 接口契约](docs/zh/agent/MCP_AUTHORING.md) | 当前创作接口、兼容工具与多工程寻址；分支约定见[多工程说明](docs/project-tabs.md) |
 | Agent | [Agent 设计](docs/zh/agent/AGENT_DESIGN.md) | 产品边界与硬约束、工具收敛、连续形变场、成本控制与分阶段验收 |
 
 > `en` / `ja` 目前只覆盖部分使用指南与规范文档，Agent 分类仅有中文。
@@ -58,7 +81,7 @@ PSD2Live 是一个自动化的 Live2D 模型生成流水线与桌面应用。输
 - **工程文件/运行时文件导出**：一键同步导出可在 Live2D Cubism Modeler 5 中二次编辑的 `.cmo3` 完整工程与运行时 `.moc3` 文件族（包含 `.model3.json`、`.cdi3.json`、`physics3.json`、`idle.motion3.json` 及纹理贴图集）；内置中立姿态保真、极限姿态完整性与变形器镜像对称性三道几何自检闸门。
 
 <p align="center">
-  <img src="docs/imgs/agent.png" alt="PSD2Live AI Agent 素材生成、接入与多参数渲染流程" />
+  <img src="docs/imgs/agent.png" alt="AIlive2dpsd AI Agent 素材生成、接入与多参数渲染流程" />
   <br>
   <em>Agent 添加发卡的案例：读取 MCP 工作流与工具、查看模型、生成并添加素材、检查其他参数姿态。该案例不代表下列更复杂任务已可用。</em>
 </p>
@@ -68,11 +91,11 @@ PSD2Live 是一个自动化的 Live2D 模型生成流水线与桌面应用。输
 待完成计划见 [`ROADMAP.md`](ROADMAP.md)，能力实测见 [`STATUS.md`](STATUS.md)（两页均为中文）。
 
 - **可用**：添加头饰或装饰物，再从多个参数姿态检查遮挡、位置与变形。
-- **待实现**：参数调整、表情与动作差分、简单图层切分、口腔部件拆分、头发拆分与遮挡补全、挥手动作、尾巴变形与物理、自生成图像与九轴调整。
+- **接口已提供、完整流程仍需验证**：参数与 K 帧编辑、源图层切分、素材导入、变形路径与物理配置。复杂表情、口腔/头发遮挡补全、挥手、尾巴及九轴调整仍依赖原图与人工验收。
 - **暂不可行**：对部件做逐点精确变形（需要 AI 逐点操作 Warp / Mesh 并正确控制各点形变）。
 
 > [!WARNING]
-> 待实现项端到端极不稳定，除非出于调试程序的目的，否则不建议尝试。已有 MCP 接口不代表 Agent 能完成任务；反复生图、定位与修正可能快速消耗大量 token 与图像生成额度，最终仍无可用结果。
+> 复杂自动化任务端到端仍不稳定，除非出于调试程序的目的，否则不建议尝试。已有 MCP 接口不代表 Agent 能完成任务；反复生图、定位与修正可能快速消耗大量 token 与图像生成额度，最终仍无可用结果。
 
 > [!IMPORTANT]
 > 这类工作流要求模型与 Agent harness 具备实际的图像生成能力。只能理解文本或图像、但无法生成并返回图片的模型，不能完成素材创建与回填步骤。
@@ -110,21 +133,23 @@ PSD2Live 是一个自动化的 Live2D 模型生成流水线与桌面应用。输
 | **画布平移** | 鼠标中键拖拽 或 左键拖拽空白 |
 | **居中适配** | `F` / `Home` / `0` |
 | **选择画元** | 鼠标左键单击画元 |
-| **打开 PSD** | `Ctrl + O` |
+| **打开工程 / 导入 PSD** | `Ctrl + O` / `Ctrl + Shift + O` |
+| **保存 / 另存为 / 全部保存** | `Ctrl + S` / `Ctrl + Shift + S` / `Ctrl + Alt + S` |
+| **新建标签 / 关闭当前标签** | `Ctrl + N` / `Ctrl + W` |
 | **重新分析** | `Ctrl + R` |
 | **生成并导出** | `Ctrl + G` |
 | **导出到...** | `Ctrl + Shift + G` |
 
 #### 连接 AI Agent / MCP
 
-1. 保持 PSD2Live 桌面应用运行，打开顶部 **工具 → MCP → MCP 连接与安装…**。
+1. 保持 AIlive2dpsd 桌面应用运行，打开顶部 **工具 → MCP → MCP 连接与安装…**。
 2. 在“连接配置”页复制宿主对应的配置：ChatGPT Desktop / Codex 使用 HTTP TOML，Gemini / Antigravity 使用 HTTP JSON。其他支持 Streamable HTTP 的宿主使用界面显示的端点和 `Authorization: Bearer <Token>` 请求头；不要改成旧 `/sse` 地址。
-3. 仅当宿主不支持 HTTP MCP 时，复制 Stdio JSON，通过 Python 3 运行仓库根目录的 `mcp_proxy.py`。代理优先读取 `PSD2LIVE_MCP_TOKEN`；Windows 上也可读取 PSD2Live 已保存的 Token。
-4. 连接后先列出工具，并调用 `inspect`（`scope: project`）读取工程与历史 HEAD 摘要。
+3. 仅当宿主不支持 HTTP MCP 时，复制 Stdio JSON，通过 Python 3 运行仓库根目录的 `mcp_proxy.py`。代理优先读取 `PSD2LIVE_MCP_TOKEN`；Windows 上也可读取 AIlive2dpsd 已保存的 Token。
+4. 连接后先调用 `tab_list` 找到目标 `tab_id`，再调用 `inspect`（`scope: project`，顶层传入 `tab_id`）读取工程。写入前调用 `tab_claim`，将返回的 `lease_id` 与 `tab_id` 一并放在工具参数顶层；嵌套 `request` 的接口同样如此。详见[多工程 MCP 说明](docs/project-tabs.md)。
 
 当前 MCP 支持工程/图层/参数读取、对象与 K 帧编辑、参数 CRUD、模型数据 PNG View、透明素材导入、软删除，以及追加式分支历史。每个会推进工程 `HEAD` 的编辑操作都要携带最新的 `state`；超时或断线后先用 `inspect`（`scope: project`）和 `revision`（`list`）确认是否已经提交，不能盲目重试。
 
-PSD2Live 提供模型 View、空间映射和 PNG 导入。素材可按画风与用户偏好选择原图像素、SVG、绘画或可用图像工具；省略 `solid_background` 时保留原生透明度。新增编辑接口与限制见 [MCP 接口契约](docs/zh/agent/MCP_AUTHORING.md)。
+AIlive2dpsd 提供模型 View、空间映射和 PNG 导入。素材可按画风与用户偏好选择原图像素、SVG、绘画或可用图像工具；省略 `solid_background` 时保留原生透明度。新增编辑接口与限制见 [MCP 接口契约](docs/zh/agent/MCP_AUTHORING.md)。
 
 ---
 
@@ -250,9 +275,9 @@ output_dir/
 - **PSD 兼容性问题**：某张分层 PSD 无法正确识别或生成。附上可复现的 PSD（或说明图层命名结构）会非常有帮助。
 - **功能建议**：希望支持的新部件、新参数、新的导出选项，或更省事的自动化。
 - **文档与教程改进**：看不懂的地方、缺失的步骤、与当前界面不一致的描述。
-- **使用案例分享**：用 PSD2Live 做出的模型、踩过的坑、有效的分层技巧。
+- **使用案例分享**：用 AIlive2dpsd 做出的模型、踩过的坑、有效的分层技巧。
 
-写 Issue 时，附上这些信息能大幅加快定位：PSD2Live 版本、操作系统、PSD 的图层结构与命名、复现步骤、期望与实际结果、日志坞中的相关输出或截图。信息不全也没关系，我们会一起把事情弄清楚。
+写 Issue 时，附上这些信息能大幅加快定位：AIlive2dpsd 版本、操作系统、PSD 的图层结构与命名、复现步骤、期望与实际结果、日志坞中的相关输出或截图。信息不全也没关系，我们会一起把事情弄清楚。
 
 ### 提交 Pull Request
 
@@ -290,6 +315,6 @@ output_dir/
 
 ## 免责声明
 
-- PSD2Live 是独立开发的开源项目，与 Live2D Inc. 及其关联方不存在任何隶属、授权或赞助关系。
+- AIlive2dpsd 是独立开发的开源项目，与 Live2D Inc. 及其关联方不存在任何隶属、授权或赞助关系。
 - `Live2D`、`Cubism`、`.cmo3`、`.moc3` 等名称与文件扩展名仅用于格式兼容性说明，其商标与知识产权归各自权利人所有。本项目不包含且不分发 Live2D 官方 SDK。
 - 本项目按“现状”提供，请在正式生产前备份原始 PSD 文件，并在目标软件中检查生成效果。

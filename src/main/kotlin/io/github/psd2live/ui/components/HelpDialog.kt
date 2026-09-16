@@ -192,7 +192,7 @@ fun HelpDialog(
 					)
 				} else {
 					Text(
-						text = "PSD2Live / GPL-3.0 / tsunehimatoi",
+						text = tr("app.credits"),
 						style = typography.caption.copy(fontSize = 11.sp),
 						color = colors.textMuted,
 					)
@@ -1025,7 +1025,7 @@ private fun DccAboutContent() {
 			horizontalArrangement = Arrangement.spacedBy(8.dp),
 		) {
 			Text(
-				text = "PSD2Live",
+				text = tr("app.name"),
 				style = typography.title.copy(fontSize = 16.sp, fontWeight = FontWeight.Bold),
 				color = colors.textPrimary,
 			)

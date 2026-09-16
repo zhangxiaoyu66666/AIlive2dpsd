@@ -9,10 +9,10 @@ import java.nio.file.Files
 import java.nio.file.Path
 
 object DesktopUtils {
-	const val GITHUB_REPO_URL = "https://github.com/tsunehimatoi/psd2live"
-	const val GITHUB_ISSUES_URL = "https://github.com/tsunehimatoi/psd2live/issues"
-	const val GITHUB_RELEASES_URL = "https://github.com/tsunehimatoi/psd2live/releases"
-	const val GITHUB_DOCS_URL = "https://github.com/tsunehimatoi/psd2live#%E6%96%87%E6%A1%A3%E7%B4%A2%E5%BC%95"
+	const val GITHUB_REPO_URL = "https://github.com/zhangxiaoyu66666/AIlive2dpsd"
+	const val GITHUB_ISSUES_URL = "$GITHUB_REPO_URL/issues"
+	const val GITHUB_RELEASES_URL = "$GITHUB_REPO_URL/releases"
+	const val GITHUB_DOCS_URL = "$GITHUB_REPO_URL/blob/master/docs/README.md"
 
 	private val lock = Any()
 	private var lastOpenTime: Long = 0L

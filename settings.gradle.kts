@@ -14,4 +14,4 @@ dependencyResolutionManagement {
 	}
 }
 
-rootProject.name = "psd2live"
+rootProject.name = "AIlive2dpsd"

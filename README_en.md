@@ -1,17 +1,36 @@
-# PSD2Live
+# AIlive2dpsd
 
 [中文](README.md) | [日本語](README_ja.md)
 
-PSD2Live is an automated Live2D model generation pipeline and desktop application. Given a layered PSD file, the system automatically performs semantic layer recognition, 8-connected bilateral splitting, adaptive Delaunay mesh triangulation, 9-pose facial lattice construction, multi-pendulum hair dynamics, and seamless idle loop generation, exporting both editable `.cmo3` editor projects and runtime `.moc3` file families.
+Maintained by [zhangxiaoyu66666](https://github.com/zhangxiaoyu66666), based on [tsunehimatoi/PSD2Live](https://github.com/tsunehimatoi/psd2live), under GPL-3.0. This fork retains the upstream modeling and export capabilities and adds the desktop workflows below.
+
+AIlive2dpsd is an automated Live2D model generation pipeline and desktop application. Given a layered PSD file, the system automatically performs semantic layer recognition, 8-connected bilateral splitting, adaptive Delaunay mesh triangulation, 9-pose facial lattice construction, multi-pendulum hair dynamics, and seamless idle loop generation, exporting both editable `.cmo3` editor projects and runtime `.moc3` file families.
 
 > [!IMPORTANT]
-> **Want to use the desktop app directly?** Windows 10/11 x64 users can download an executable from [Releases](https://github.com/tsunehimatoi/psd2live/releases/latest). Extract and run the portable ZIP, or choose the EXE or MSI installer. These packages include a Java runtime, so no source-build environment is required.
+> **Use this fork:** Check [AIlive2dpsd Releases](https://github.com/zhangxiaoyu66666/AIlive2dpsd/releases) for published builds. If none is available, run from source or use `./gradlew.bat createDistributable` to build the Windows application with its Java runtime. Upstream PSD2Live releases do not include this fork’s additions.
 
 <p align="center">
-  <img src="docs/imgs/use.gif" alt="PSD2Live Workflow Demo" />
+  <img src="docs/imgs/use.gif" alt="AIlive2dpsd Workflow Demo" />
   <br>
   <em>End-to-end automated modeling, real-time gaze tracking, and dynamic preview</em>
 </p>
+
+---
+
+## Added in this fork
+
+- **Independent project tabs:** separate parameters, undo history and previews; scrollable tabs with active-tab reveal. `Ctrl+N` creates a tab; `Ctrl+W` closes it.
+- **Save all:** File → Save all or `Ctrl+Alt+S`; existing paths save directly, new projects request locations in sequence, and empty or unchanged saved tabs are skipped.
+- **Save before closing:** one Save all and close / Discard all / Cancel choice. Cancellation, write failures or new edits keep every project open.
+- **Preview by default:** startup, new tabs and PSD imports open the preview. Menu opens create tabs; a single-file drop replaces the current tab only after a successful load.
+- **See-Through workflow:** manually open the ST API page to connect to a separately running local service, upload images, follow decomposition progress, resume results, export PSD and import it for editing. Confirmed and imported source versions are recorded separately.
+- **MCP across projects:** explicit `tab_id` targeting and write leases; existing tools coexist with upstream authoring tools, independently of the visible tab.
+- **Eye and mesh repairs:** preserve soft edges and fine eyelash contours, improve closed-eye remnants and eyebrow ordering, and stop mesh regeneration when authored vertex keyforms or glue would be affected. See [Eye and mesh reliability](docs/eye-rig-reliability.md).
+- **Preview and file dialogs:** reused Skia textures, batched mesh drawing and native Windows open/save/folder pickers with a single cancellation flow.
+
+Upstream deform paths, texture upscaling, PSD re-export, display scaling and preferences are also included. See [Project tabs and MCP](docs/project-tabs.md), [Source workflow](docs/source-workflow.md) and [Preview performance](docs/preview-performance.md). Existing `.psd2live` archives, MCP configuration names and `PSD2LIVE_MCP_TOKEN` remain compatible.
+
+The merged version passed 211 automated tests and packaged-runtime checks on 2026-09-16. These do not replace native-window, Cubism Editor or real-model visual acceptance.
 
 ---
 
@@ -27,7 +46,7 @@ Documents are organized by **category × language** (`docs/<language>/<category>
 | Spec | [Deformer & Math Specification](docs/en/spec/DEFORMER_AND_PARAMETER_SPEC.md) | Deformer tree topology, 9-pose facial lattice math, C1 roll curve, feature warps, and physics |
 | Spec | [Project Format (version 1)](docs/en/spec/PROJECT_FORMAT.md) | `.psd2live` archive layout, save/recovery semantics, validation rules, and UI/MCP entry points |
 | Spec | [Implementation Comparison](docs/en/spec/IMPLEMENTATION_COMPARISON.md) | Technical comparison across 16 pipeline stages, coordinate invariants, and integrity verification |
-| Agent | [MCP Interface Contract (Chinese)](docs/zh/agent/MCP_AUTHORING.md) | Currently callable MCP tools, parameter and return-value constraints, asset import, and knowledge entry points |
+| Agent | [MCP Interface Contract (Chinese)](docs/zh/agent/MCP_AUTHORING.md) | Authoring tools, compatible legacy tools and explicit project routing; see [Project tabs](docs/project-tabs.md) for fork-specific contracts |
 | Agent | [Agent Design (Chinese)](docs/zh/agent/AGENT_DESIGN.md) | Product boundaries, hard constraints, tool convergence, continuous deformation fields, cost control, and staged acceptance |
 
 > The `agent` category is currently Chinese-only. Chinese additionally provides a [texture upscaling guide](docs/zh/guide/TEXTURE_UPSCALE.md) and a [summary of the project format](docs/zh/spec/PROJECT_FORMAT.md).
@@ -54,7 +73,7 @@ Documents are organized by **category × language** (`docs/<language>/<category>
 - **Project & Runtime Export**: Synchronized one-click export of editable Live2D Cubism Modeler 5 `.cmo3` projects and `.moc3` runtime families (`.model3.json`, `.cdi3.json`, `physics3.json`, `idle.motion3.json`, and texture atlases); enforced three-stage geometric integrity gates (neutral pose fidelity, extreme angle bounds, and warp lattice mirror symmetry).
 
 <p align="center">
-  <img src="docs/imgs/agent.png" alt="PSD2Live AI Agent asset generation, integration, and multi-parameter render workflow" />
+  <img src="docs/imgs/agent.png" alt="AIlive2dpsd AI Agent asset generation, integration, and multi-parameter render workflow" />
   <br>
   <em>An example of an Agent adding a hair clip: reading MCP workflows and tools, inspecting the model, generating and adding the asset, and checking other parameter poses. This example does not establish that the more complex tasks below are available.</em>
 </p>
@@ -64,11 +83,11 @@ Documents are organized by **category × language** (`docs/<language>/<category>
 Planned work is listed in [`ROADMAP.md`](ROADMAP.md) and measured capability results are in [`STATUS.md`](STATUS.md). Both are Chinese-only.
 
 - **Available**: add hair accessories or decorations, then check occlusion, placement and deformation across parameter poses.
-- **Pending**: parameter tuning, expression and action variants, simple layer separation, mouth-internal separation, hair separation with occlusion fill, waving motion, tail deformation and physics, generated artwork with nine-axis adjustment.
+- **Interfaces available; full workflows still need validation**: parameter and keyform editing, layer separation, asset import, deform paths and physics. Complex tasks such as expressions, hair separation with occlusion fill, waving motion and generated artwork with nine-axis adjustment still need real-model validation.
 - **Beyond reach**: precise per-point deformation of a part, which requires driving Warp and Mesh points individually.
 
 > [!WARNING]
-> Pending tasks are extremely unstable end to end. Unless you are debugging the program, we recommend not attempting them. Existing MCP interfaces do not mean an Agent can complete a task; repeated generation, positioning and correction can quickly consume large amounts of tokens and image-generation quota without producing a usable result.
+> Complex automated tasks remain unstable end to end. Unless you are debugging the program, we recommend not attempting them. Existing MCP interfaces do not mean an Agent can complete a task; repeated generation, positioning and correction can quickly consume large amounts of tokens and image-generation quota without producing a usable result.
 
 > [!IMPORTANT]
 > These workflows require both the selected model and the Agent harness to expose a working image-generation capability. A model that can only understand text or images, but cannot generate and return an image, cannot complete asset creation and import.
@@ -106,21 +125,23 @@ Results depend on the model, image generator, Agent harness, prompt, and the qua
 | **Pan** | Middle Click Drag / Left Click Blank Drag |
 | **Center & Fit** | `F` / `Home` / `0` |
 | **Select Mesh** | Left Click on Mesh |
-| **Open PSD** | `Ctrl + O` |
+| **Open project / Import PSD** | `Ctrl + O` / `Ctrl + Shift + O` |
+| **Save / Save as / Save all** | `Ctrl + S` / `Ctrl + Shift + S` / `Ctrl + Alt + S` |
+| **New tab / Close current tab** | `Ctrl + N` / `Ctrl + W` |
 | **Reanalyze** | `Ctrl + R` |
 | **Generate & Export** | `Ctrl + G` |
 | **Export To...** | `Ctrl + Shift + G` |
 
 #### Connecting an AI Agent / MCP Host
 
-1. Keep the PSD2Live desktop app running and open **Tools → MCP → MCP Connection & Prompts…**.
+1. Keep the AIlive2dpsd desktop app running and open **Tools → MCP → MCP Connection & Prompts…**.
 2. Copy the matching configuration: HTTP TOML for ChatGPT desktop/Codex, or HTTP JSON for Gemini/Antigravity. Other Streamable HTTP hosts use the displayed endpoint and `Authorization: Bearer <token>` header; do not change it to the legacy `/sse` endpoint.
-3. Use the Stdio JSON fallback only for hosts without HTTP MCP support. It runs the repository-root `mcp_proxy.py` with Python 3 and reads `PSD2LIVE_MCP_TOKEN`; on Windows it can also read the token saved by PSD2Live.
-4. List tools after connecting, then call `inspect` (`scope: project`) for the project and history HEAD summary.
+3. Use the Stdio JSON fallback only for hosts without HTTP MCP support. It runs the repository-root `mcp_proxy.py` with Python 3 and reads `PSD2LIVE_MCP_TOKEN`; on Windows it can also read the token saved by AIlive2dpsd.
+4. Call `tab_list`, choose a `tab_id`, then call `inspect` (`scope: project`) with that ID at the top level. Before writing, call `tab_claim` and include its `lease_id` alongside `tab_id`. Tools with nested `request` arguments use the same top-level routing fields. See [Project tabs and MCP](docs/project-tabs.md).
 
 The MCP currently exposes project/layer/parameter reads, object and keyform editing, parameter CRUD, model-data PNG Views, transparent-asset import, soft deletion, and append-only branch history. Every project edit that advances `HEAD` must use the latest `state`. After a timeout or disconnect, call `inspect` (`scope: project`) and `revision` (`list`) before deciding whether to retry.
 
-PSD2Live provides model Views, spatial mapping and PNG import. Artwork can use original pixels, SVG, painting or an available image editor according to style and user preference. Native PNG alpha is retained when solid_background is omitted. See the [MCP interface contract](docs/zh/agent/MCP_AUTHORING.md).
+AIlive2dpsd provides model Views, spatial mapping and PNG import. Artwork can use original pixels, SVG, painting or an available image editor according to style and user preference. Native PNG alpha is retained when solid_background is omitted. See the [MCP interface contract](docs/zh/agent/MCP_AUTHORING.md).
 
 ---
 
@@ -246,9 +267,9 @@ Please open an issue for problems, questions or ideas:
 - **PSD compatibility problems**: a layered PSD that is misclassified or fails to generate. Attaching a reproducible PSD, or describing its layer naming, helps enormously.
 - **Feature requests**: new parts, new parameters, new export options, or automation that saves you work.
 - **Documentation and tutorial gaps**: anything unclear, missing steps, or text that no longer matches the interface.
-- **Showcases and field notes**: models you built with PSD2Live, pitfalls you hit, and layering tricks that worked.
+- **Showcases and field notes**: models you built with AIlive2dpsd, pitfalls you hit, and layering tricks that worked.
 
-Including the PSD2Live version, your operating system, the PSD layer structure and naming, reproduction steps, expected versus actual results, and any log-dock output or screenshots makes triage much faster. Incomplete reports are fine too, and we will work out the details together.
+Including the AIlive2dpsd version, your operating system, the PSD layer structure and naming, reproduction steps, expected versus actual results, and any log-dock output or screenshots makes triage much faster. Incomplete reports are fine too, and we will work out the details together.
 
 ### Sending a pull request
 
@@ -286,6 +307,6 @@ Thank you to everyone who files an issue, shares a case, or sends code. This pro
 
 ## Disclaimer
 
-- PSD2Live is an independent open-source project and is not affiliated with, endorsed by, or sponsored by Live2D Inc. or its affiliates.
+- AIlive2dpsd is an independent open-source project and is not affiliated with, endorsed by, or sponsored by Live2D Inc. or its affiliates.
 - Names and file extensions such as `Live2D`, `Cubism`, `.cmo3`, and `.moc3` are used solely for format interoperability and compatibility descriptions. All trademarks and intellectual property rights belong to their respective holders. This project does not contain or redistribute the official proprietary Live2D Cubism SDK.
 - This software is provided "as is". Users should maintain backups of original PSD assets and inspect generated output in target applications prior to production use.

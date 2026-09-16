@@ -133,7 +133,7 @@ fun FrameWindowScope.PSD2LiveApp(
         JOptionPane.showOptionDialog(window, tr("project.unsaved"), tr("project.save"), JOptionPane.DEFAULT_OPTION,
             JOptionPane.QUESTION_MESSAGE, null, arrayOf(tr("project.save"), tr("project.discard"), tr("project.cancel")), tr("project.save"))
     }
-    LaunchedEffect(state.projectFile, state.projectDirty) { window?.title = "PSD2Live — " + (state.projectFile ?: tr("project.untitled")) + if (state.projectDirty) " *" else "" }
+    LaunchedEffect(state.projectFile, state.projectDirty) { window?.title = tr("app.name") + " — " + (state.projectFile ?: tr("project.untitled")) + if (state.projectDirty) " *" else "" }
     // Language key tracking for recomposition
 	val currentLanguage = state.currentLanguage
 

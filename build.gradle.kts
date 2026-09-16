@@ -12,6 +12,7 @@ plugins {
 
 group = "io.github.psd2live"
 version = "0.7.1"
+val desktopAppName = "AIlive2dpsd"
 
 kotlin {
 	jvmToolchain(21)
@@ -126,15 +127,15 @@ compose.desktop {
 				org.jetbrains.compose.desktop.application.dsl.TargetFormat.Exe,
 				org.jetbrains.compose.desktop.application.dsl.TargetFormat.Msi,
 			)
-			packageName = "PSD2Live"
+			packageName = desktopAppName
 			packageVersion = "0.7.1"
-			description = "PSD2Live - Automated Live2D Rigging Pipeline"
+			description = "AIlive2dpsd - Live2D Authoring by zhangxiaoyu66666"
 			copyright = "© 2026 PSD2Live. Licensed under GPL-3.0."
-			vendor = "PSD2Live"
+			vendor = "zhangxiaoyu66666"
 
 			windows {
-				menuGroup = "PSD2Live"
-				upgradeUuid = "8e9c4b1a-2d3e-4f5a-6b7c-8d9e0f1a2b3c"
+				menuGroup = desktopAppName
+				upgradeUuid = "0681f3a4-5f8c-5443-8c49-9f59520b743c"
 			}
 		}
 	}
@@ -172,7 +173,7 @@ afterEvaluate {
 
 	tasks.named("createDistributable").configure {
 		doLast {
-			val appDir = desktopDistributionRoot.get().dir("main/app/PSD2Live/app").asFile
+			val appDir = desktopDistributionRoot.get().dir("main/app/$desktopAppName/app").asFile
 			if (appDir.exists()) {
 				copy {
                     from("LICENSE", "THIRD_PARTY_NOTICES.md", "docs/eye-rig-reliability.md", "docs/native-file-picker.md", "docs/project-tabs.md", "docs/source-workflow.md")
@@ -258,7 +259,7 @@ val verifyPackagedFilePicker = tasks.register<JavaExec>("verifyPackagedFilePicke
             tasks.named("createDistributable").get().state.failure == null
     }
     doFirst {
-        val app = desktopDistributionRoot.get().dir("main/app/PSD2Live").asFile
+        val app = desktopDistributionRoot.get().dir("main/app/$desktopAppName").asFile
         val runtime = File(app, "runtime")
         check(File(runtime, "bin/server/jvm.dll").isFile) { "Packaged JVM is missing: $runtime" }
         classpath = files(sourceSets["test"].output.classesDirs, fileTree(File(app, "app")) { include("*.jar") })

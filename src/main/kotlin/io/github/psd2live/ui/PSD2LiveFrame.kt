@@ -514,7 +514,7 @@ class PSD2LiveFrame : JFrame() {
 					JOptionPane.showMessageDialog(
 						this@PSD2LiveFrame,
 						tr("dialog.exportSuccess", result.exportedFiles.size, output),
-						"PSD2Live",
+						tr("app.name"),
 						JOptionPane.INFORMATION_MESSAGE,
 					)
 				} catch (failure: Exception) { showFailure(unwrap(failure)) }
@@ -671,7 +671,7 @@ class PSD2LiveFrame : JFrame() {
 	}
 
 	private fun outputPathOrNull(): Path? = outputField.text.trim().takeIf(String::isNotEmpty)?.let(Path::of)
-	private fun showMessage(message: String) = JOptionPane.showMessageDialog(this, message, "PSD2Live", JOptionPane.WARNING_MESSAGE)
+	private fun showMessage(message: String) = JOptionPane.showMessageDialog(this, message, tr("app.name"), JOptionPane.WARNING_MESSAGE)
 	private fun showFailure(failure: Throwable) {
 		finishWorker()
 		val detail = failure.message ?: failure.javaClass.simpleName
