@@ -16,7 +16,7 @@ import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 
 data class DesktopProjectTab(val id: String, val viewModel: PSD2LiveViewModel, val workspace: ViewModelAgentWorkspace)
-data class DesktopTabsState(val tabs: List<DesktopProjectTab> = emptyList(), val activeId: String? = null, val ownershipVersion: Long = 0, val openingTabs: Set<String> = emptySet())
+data class DesktopTabsState(val tabs: List<DesktopProjectTab> = emptyList(), val activeId: String? = null, val ownershipVersion: Long = 0, val openingTabs: Set<String> = emptySet(), val savingAll: Boolean = false)
 
 /** UI lifecycle lives on Main; MCP routing remains independent of selection. */
 class DesktopProjectTabs : AutoCloseable {
@@ -27,6 +27,7 @@ class DesktopProjectTabs : AutoCloseable {
     private val paths = TabPathClaims()
     private val closed = AtomicBoolean()
     var confirmUnsaved: (() -> Int)? = null
+    var confirmCloseAll: (() -> Int)? = null
     var reportError: (String) -> Unit = {}
 
     init {
@@ -59,7 +60,7 @@ class DesktopProjectTabs : AutoCloseable {
 
     private fun prepareTab(id: String, path: Path?): DesktopProjectTab {
         val vm = PSD2LiveViewModel()
-        vm.setWorkspaceTab(if (path == null) WorkspaceTab.SEE_THROUGH else WorkspaceTab.PREVIEW)
+        vm.setWorkspaceTab(WorkspaceTab.PREVIEW)
         val workspace = ViewModelAgentWorkspace(vm)
         vm.attachAgentWorkspace(workspace)
         vm.presentationActive = false
@@ -113,6 +114,7 @@ class DesktopProjectTabs : AutoCloseable {
 
     /** Replace the active slot only after the new file has loaded; errors keep the existing model. */
     fun openInCurrent(path: Path) {
+        if (mutable.value.savingAll) return
         val current = mutable.value.tabs.firstOrNull { it.id == mutable.value.activeId } ?: return
         try {
             require(Files.isRegularFile(path)) { tr("dialog.inputInvalid", path) }
@@ -180,6 +182,7 @@ class DesktopProjectTabs : AutoCloseable {
     }
 
     fun requestClose(id: String, afterClose: (() -> Unit)? = null) {
+        if (mutable.value.savingAll) return
         val tab = mutable.value.tabs.firstOrNull { it.id == id } ?: return
         val previousActive = mutable.value.activeId
         val position = mutable.value.tabs.indexOf(tab)
@@ -206,9 +209,57 @@ class DesktopProjectTabs : AutoCloseable {
         }
     }
 
+    fun requestSaveAll(onSaved: () -> Unit = {}) {
+        if (mutable.value.savingAll) return
+        val snapshot = mutable.value
+        if (snapshot.tabs.any { tabBusy(it) || it.viewModel.state.value.showProjectLocationDialog }) {
+            reportError(tr("tabs.busy")); return
+        }
+        mutable.value = snapshot.copy(savingAll = true)
+        scope.launch {
+            var saved = false
+            try {
+                saved = saveAllProjects(snapshot.tabs, ::select) { tab ->
+                    mutable.value.tabs.any { it === tab } && !tabBusy(tab) && !tab.viewModel.state.value.showProjectLocationDialog
+                }
+                if (saved) snapshot.activeId?.let(::select)
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (failure: Exception) { reportError(failure.message ?: tr("project.saveAllFailed")) }
+            finally { mutable.value = mutable.value.copy(savingAll = false) }
+            if (saved) onSaved()
+        }
+    }
+
     fun requestCloseAll(done: () -> Unit) {
-        val next = mutable.value.tabs.firstOrNull()
-        if (next == null) done() else requestClose(next.id) { requestCloseAll(done) }
+        if (mutable.value.savingAll) return
+        val snapshot = mutable.value.tabs
+        if (snapshot.any { tabBusy(it) || it.viewModel.state.value.showProjectLocationDialog }) {
+            reportError(tr("tabs.busy")); return
+        }
+        val versions = snapshot.associate { it.id to it.viewModel.state.value.projectEditVersion }
+        val dirty = snapshot.any { it.viewModel.state.value.projectDirty }
+        when (if (dirty) confirmCloseAll?.invoke() ?: 2 else 1) {
+            0 -> requestSaveAll { closeAllConfirmed(snapshot, null, done) }
+            1 -> closeAllConfirmed(snapshot, versions, done)
+        }
+    }
+
+    private fun closeAllConfirmed(snapshot: List<DesktopProjectTab>, discardedVersions: Map<String, Long>?, done: () -> Unit) {
+        // Validate every project under the MCP gates before releasing any of them.
+        if (!agents.tryRemoveAll(snapshot.map { it.id }) {
+            mutable.value.tabs == snapshot && snapshot.all { tab ->
+                val current = tab.viewModel.state.value
+                !tabBusy(tab) && !current.showProjectLocationDialog &&
+                    (!current.projectDirty || discardedVersions?.get(tab.id) == current.projectEditVersion)
+            }
+        }) { reportError(tr("tabs.busy")); return }
+        snapshot.forEach { tab ->
+            tab.viewModel.close()
+            scope.launch(Dispatchers.IO) { tab.workspace.close() }
+            paths.release(tab.id)
+        }
+        mutable.value = mutable.value.copy(tabs = emptyList(), activeId = null)
+        done()
     }
 
     override fun close() {

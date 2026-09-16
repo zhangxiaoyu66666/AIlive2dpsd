@@ -27,6 +27,11 @@ fun FrameWindowScope.DesktopTabsApp(
             JOptionPane.QUESTION_MESSAGE, null, arrayOf(tr("project.save"), tr("project.discard"), tr("project.cancel")), tr("project.save"))
     }
     controller.reportError = { JOptionPane.showMessageDialog(window, it, tr("app.title"), JOptionPane.WARNING_MESSAGE) }
+    controller.confirmCloseAll = {
+        JOptionPane.showOptionDialog(window, tr("project.unsavedAll"), tr("project.saveAll"), JOptionPane.DEFAULT_OPTION,
+            JOptionPane.QUESTION_MESSAGE, null,
+            arrayOf(tr("project.saveAllAndClose"), tr("project.discardAll"), tr("project.cancel")), tr("project.saveAllAndClose"))
+    }
     val active = tabs.tabs.firstOrNull { it.id == tabs.activeId }
     if (active != null) key(active.id, active.viewModel) {
         PSD2LiveApp(
@@ -35,6 +40,7 @@ fun FrameWindowScope.DesktopTabsApp(
             onOpenPath = controller::open,
             onDropPath = controller::openInCurrent,
             onNewTab = { controller.create() }, onCloseTab = { controller.requestClose(active.id) },
+            onSaveAll = { controller.requestSaveAll() }, canSaveAll = !tabs.savingAll,
             projectTabs = { ProjectTabBar(controller, tabs, tabScroll) },
         )
     }

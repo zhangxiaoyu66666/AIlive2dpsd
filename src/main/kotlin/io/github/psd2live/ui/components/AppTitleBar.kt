@@ -78,6 +78,8 @@ fun AppTitleBar(
     onOpenProject: () -> Unit,
     onSaveProject: () -> Unit,
     onSaveProjectAs: () -> Unit,
+    onSaveAll: () -> Unit,
+    canSaveAll: Boolean,
     projectTitle: String,
 	onReanalyze: () -> Unit,
 	onOpenOutput: () -> Unit,
@@ -129,6 +131,7 @@ fun AppTitleBar(
                     AppMenuItem(text = tr("project.open"), shortcut = "Ctrl+O", enabled = !isBusy, onClick = { activeMenu = null; onOpenProject() })
                     AppMenuItem(text = tr("project.save"), shortcut = "Ctrl+S", enabled = hasInput, onClick = { activeMenu = null; onSaveProject() })
                     AppMenuItem(text = tr("project.saveAs"), shortcut = "Ctrl+Shift+S", enabled = hasInput, onClick = { activeMenu = null; onSaveProjectAs() })
+                    AppMenuItem(text = tr("project.saveAll"), shortcut = "Ctrl+Alt+S", enabled = canSaveAll, onClick = { activeMenu = null; onSaveAll() })
 					AppMenuItem(
 						text = tr("menu.file.openPsd"),
 						shortcut = "Ctrl+Shift+O",

@@ -105,5 +105,21 @@ class AgentWorkspaceTabs {
         } finally { entry.operations.unlock() }
     }
 
+    /** Window close is all-or-nothing, including tabs with an in-flight MCP operation. */
+    fun tryRemoveAll(ids: List<String>, canClose: () -> Boolean): Boolean {
+        val locked = mutableListOf<Pair<String, Entry>>()
+        try {
+            for (id in ids.distinct().sorted()) {
+                val entry = entries[id] ?: return false
+                if (!entry.operations.tryLock()) return false
+                locked += id to entry
+                if (entry.closed) return false
+            }
+            if (!canClose()) return false
+            locked.forEach { (id, entry) -> entry.closed = true; entries.remove(id, entry) }
+            return true
+        } finally { locked.asReversed().forEach { (_, entry) -> entry.operations.unlock() } }
+    }
+
     private fun requireEntry(id: String): Entry = entries[id] ?: error("Unknown or closed tab_id: $id. Call tab_list.")
 }

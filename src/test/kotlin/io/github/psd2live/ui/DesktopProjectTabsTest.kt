@@ -5,15 +5,43 @@ import kotlinx.coroutines.*
 import kotlin.test.*
 
 class DesktopProjectTabsTest {
+    @Test fun closeAllCancelAndConcurrentEditsPreserveEveryTab() = runBlocking<Unit> {
+        withContext(Dispatchers.Main) {
+            val controller = DesktopProjectTabs()
+            try {
+                val blank = controller.state.value.tabs.single()
+                val dirty = controller.create()
+                dirty.viewModel.setStateForTest(dirty.viewModel.state.value.copy(projectDirty = true, projectEditVersion = 1))
+                var closed = false
+                controller.confirmCloseAll = { 2 }
+                controller.requestCloseAll { closed = true }
+                assertFalse(closed)
+                assertEquals(listOf(blank, dirty), controller.state.value.tabs)
+                controller.confirmCloseAll = {
+                    dirty.viewModel.setStateForTest(dirty.viewModel.state.value.copy(projectEditVersion = 2))
+                    1
+                }
+                controller.requestCloseAll { closed = true }
+                assertFalse(closed)
+                assertEquals(listOf(blank, dirty), controller.state.value.tabs)
+                controller.confirmCloseAll = { 1 }
+                controller.requestCloseAll { closed = true }
+                assertTrue(closed)
+                assertTrue(controller.state.value.tabs.isEmpty())
+            } finally { controller.close() }
+        }
+    }
+
     @Test fun switchingPreservesPerTabStateAndPausesBackgroundPresentation() = runBlocking<Unit> {
         withContext(Dispatchers.Main) {
             val controller = DesktopProjectTabs()
             try {
                 val a = controller.state.value.tabs.single()
-                assertEquals(io.github.psd2live.ui.state.WorkspaceTab.SEE_THROUGH, a.viewModel.state.value.activeWorkspaceTab)
+                assertEquals(io.github.psd2live.ui.state.WorkspaceTab.PREVIEW, a.viewModel.state.value.activeWorkspaceTab)
                 a.viewModel.setStateForTest(a.viewModel.state.value.copy(inputPath = "a.psd", outputPath = "a-export", projectDirty = true, projectEditVersion = 4))
                 val saved = a.viewModel.state.value
                 val b = controller.create()
+                assertEquals(io.github.psd2live.ui.state.WorkspaceTab.PREVIEW, b.viewModel.state.value.activeWorkspaceTab)
                 b.viewModel.setStateForTest(b.viewModel.state.value.copy(inputPath = "b.psd", outputPath = "b-export"))
                 assertFalse(a.viewModel.presentationActive)
                 assertTrue(b.viewModel.presentationActive)

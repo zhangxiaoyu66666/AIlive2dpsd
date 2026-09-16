@@ -20,6 +20,21 @@ internal class TabTestWorkspace(private val id: String) : AgentWorkspace {
 }
 
 class AgentWorkspaceTabsTest {
+    @Test fun batchCloseWithBusyOrChangedProjectDoesNotRemoveAnyWorkspace() = runBlocking<Unit> {
+        val tabs = AgentWorkspaceTabs()
+        tabs.register("a", TabTestWorkspace("a")); tabs.register("b", TabTestWorkspace("b"))
+        val entered = CompletableDeferred<Unit>(); val finish = CompletableDeferred<Unit>()
+        val operation = launch { tabs.withWorkspace("b", null, false) { entered.complete(Unit); finish.await() } }
+        entered.await()
+        assertFalse(tabs.tryRemoveAll(listOf("a", "b")) { true })
+        assertEquals("a", tabs.withWorkspace("a", null, false) { it.snapshot().projectId })
+        finish.complete(Unit); operation.join()
+        assertFalse(tabs.tryRemoveAll(listOf("a", "b")) { false })
+        assertEquals(2, tabs.manifest()["tabs"]!!.jsonArray.size)
+        assertTrue(tabs.tryRemoveAll(listOf("a", "b")) { true })
+        assertTrue(tabs.manifest()["tabs"]!!.jsonArray.isEmpty())
+    }
+
     @Test fun leasesAreIndependentAndRevocable() = runBlocking<Unit> {
         val tabs = AgentWorkspaceTabs()
         val a = TabTestWorkspace("a"); val b = TabTestWorkspace("b")

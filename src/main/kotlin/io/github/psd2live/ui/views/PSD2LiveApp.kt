@@ -48,6 +48,7 @@ import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.isAltPressed
 import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
@@ -96,6 +97,8 @@ fun FrameWindowScope.PSD2LiveApp(
     onDropPath: ((Path) -> Unit)? = null,
     onNewTab: (() -> Unit)? = null,
     onCloseTab: (() -> Unit)? = null,
+    onSaveAll: (() -> Unit)? = null,
+    canSaveAll: Boolean = true,
     projectTabs: @Composable () -> Unit = {},
 	onCloseRequest: () -> Unit = {
 		viewModel.close()
@@ -207,7 +210,11 @@ fun FrameWindowScope.PSD2LiveApp(
                                 if (event.isShiftPressed) onOpenPsdAction() else onOpenProjectAction()
 								true
 							}
-							Key.S -> { viewModel.requestProjectSave(event.isShiftPressed); true }
+							Key.S -> {
+                                if (event.isAltPressed) { if (canSaveAll) onSaveAll?.invoke() }
+                                else viewModel.requestProjectSave(event.isShiftPressed)
+                                true
+                            }
                             Key.Z -> { if (event.isShiftPressed) viewModel.redoHistory() else viewModel.undoHistory(); true }
                             Key.Y -> { viewModel.redoHistory(); true }
                             Key.R -> {
@@ -246,6 +253,8 @@ fun FrameWindowScope.PSD2LiveApp(
                         onOpenProject = onOpenProjectAction,
                         onSaveProject = { viewModel.requestProjectSave() },
                         onSaveProjectAs = { viewModel.requestProjectSave(true) },
+                        onSaveAll = onSaveAll ?: { viewModel.requestProjectSave() },
+                        canSaveAll = canSaveAll,
                         projectTitle = (state.projectFile ?: tr("project.untitled")) + if (state.projectDirty) " *" else "",
 						onReanalyze = onReanalyzeAction,
 						onOpenOutput = { openFolder(state.outputPath) },
